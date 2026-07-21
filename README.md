@@ -1,4 +1,4 @@
-# Gnome Shell Session Time
+# Gnome Shell Session Timer
 
 A minimal GNOME Shell extension that shows, right in the top panel, how long
 you've actually been active (screen unlocked) today.
@@ -18,19 +18,19 @@ None to install. Everything used (`GLib`, `GObject`, `Gio`, `Clutter`, `St`) shi
 
 1. Clone this repository to your preferred location:
    ```bash
-   git clone git@github.com:firebirdberlin/gnome-shell-session-time.git ~/Projects/gnome-shell-session-time
+   git clone git@github.com:firebirdberlin/gnome-shell-session-timer.git ~/Projects/gnome-shell-session-timer
    ```
 
 2. Create a symbolic link pointing from your GNOME Shell extensions directory to the cloned repository:
    ```bash
-   ln -s ~/Projects/gnome-shell-session-time ~/.local/share/gnome-shell/extensions/gnome-shell-session-time@firebirdberlin
+   ln -s ~/Projects/gnome-shell-session-timer ~/.local/share/gnome-shell/extensions/gnome-shell-session-timer@firebirdberlin
    ```
 
    > ⚠️ **Important (Wayland users):** GNOME Shell only scans for new extension directories during startup. If you are running Wayland, you **must log out and log back in now**, otherwise the next step will fail with an error stating the extension does not exist.
 
 3. Enable the extension:
    ```bash
-   gnome-extensions enable gnome-shell-session-time@firebirdberlin
+   gnome-extensions enable gnome-shell-session-timer@firebirdberlin
    ```
 
 ## How it works

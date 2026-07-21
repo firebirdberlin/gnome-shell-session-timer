@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<schemalist gettext-domain="gnome-shell-session-time">
-  <schema id="org.gnome.shell.extensions.gnome-shell-session-time"
-          path="/org/gnome/shell/extensions/gnome-shell-session-time/">
+<schemalist gettext-domain="gnome-shell-session-timer">
+  <schema id="org.gnome.shell.extensions.gnome-shell-session-timer"
+          path="/org/gnome/shell/extensions/gnome-shell-session-timer/">
     <key name="max-working-hours" type="d">
       <default>0.0</default>
       <summary>Maximum working hours</summary>

@@ -29,10 +29,10 @@ const RAINBOW_GRADIENT_STOPS = [
     [1.00, 0.65, 0.15, 0.65], // violet
 ];
 
-const SessionTimeIndicator = GObject.registerClass(
-    class SessionTimeIndicator extends PanelMenu.Button {
+const SessionTimerIndicator = GObject.registerClass(
+    class SessionTimerIndicator extends PanelMenu.Button {
         _init(extensionPath, metadata, settings, openPreferences) {
-            super._init(0.0, 'Gnome Shell Session Time', false);
+            super._init(0.0, 'Gnome Shell Session Timer', false);
 
             this._metadata = metadata || {};
             this._stateFile = Gio.File.new_for_path(extensionPath).get_child('state.json');
@@ -48,7 +48,8 @@ const SessionTimeIndicator = GObject.registerClass(
             this._accumulatedSeconds = 0;
             this._today = null; // 'YYYY-MM-DD', local time
             this._isLocked = false;
-            this._segmentStartUsec = null; // GLib.get_real_time() value, or null while locked
+            this._isPaused = false; // user-requested pause, independent of lock state
+            this._segmentStartUsec = null; // GLib.get_real_time() value, or null while locked/paused
             this._destroyed = false;
 
             this._tickId = null;
@@ -80,9 +81,34 @@ const SessionTimeIndicator = GObject.registerClass(
             box.add_child(this._label);
             this.add_child(box);
 
-            this._menuStatusItem = new PopupMenu.PopupMenuItem('Active today: --', {
+            this._menuStatusItem = new PopupMenu.PopupBaseMenuItem({
                 reactive: false,
+                can_focus: false,
+                style_class: 'session-timer-status-item',
             });
+            this._menuStatusLabel = new St.Label({
+                text: 'Active today: --',
+                x_expand: true,
+                x_align: Clutter.ActorAlign.START,
+                y_align: Clutter.ActorAlign.CENTER,
+                style_class: 'session-timer-menu-label',
+            });
+            this._menuStatusItem.add_child(this._menuStatusLabel);
+
+            // Pause/resume toggle — freezes accumulation without needing
+            // the screen to be locked, e.g. for a lunch break.
+            this._pauseButton = new St.Button({
+                label: '⏹',
+                style_class: 'session-timer-pause-button session-timer-pause-button-stopped',
+                can_focus: true,
+                reactive: true,
+                track_hover: true,
+                x_align: Clutter.ActorAlign.END,
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            this._pauseButton.connect('clicked', () => this._togglePause());
+            this._menuStatusItem.add_child(this._pauseButton);
+
             this.menu.addMenuItem(this._menuStatusItem);
 
             // Progress bar towards the configured working-hours target —
@@ -90,19 +116,19 @@ const SessionTimeIndicator = GObject.registerClass(
             this._progressBarItem = new PopupMenu.PopupBaseMenuItem({
                 reactive: false,
                 can_focus: false,
-                style_class: 'session-time-progress-item',
+                style_class: 'session-timer-progress-item',
             });
             // FixedLayout allocates children at their own explicitly-set
             // position/size and never re-centers them — BinLayout's
             // x-align: START isn't reliably honored here across Shell
             // versions, which was leaving the fill visually centered.
             this._progressBarTrack = new St.Widget({
-                style_class: 'session-time-progress-track',
+                style_class: 'session-timer-progress-track',
                 layout_manager: new Clutter.FixedLayout(),
                 x_expand: true,
             });
             this._progressBarFill = new St.Widget({
-                style_class: 'session-time-progress-fill',
+                style_class: 'session-timer-progress-fill',
                 width: 0,
             });
             this._progressBarFill.set_position(0, 0);
@@ -120,10 +146,18 @@ const SessionTimeIndicator = GObject.registerClass(
             this.menu.addMenuItem(preferencesItem);
             preferencesItem.connect('activate', () => this._openPreferences());
 
-            // About — always the last item in the menu
             const aboutItem = new PopupMenu.PopupMenuItem('ℹ️ About');
             this.menu.addMenuItem(aboutItem);
             aboutItem.connect('activate', () => this._showAboutDialog());
+
+            // Buy me a coffee — always the last item in the menu
+            this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            const donateItem = new PopupMenu.PopupMenuItem('☕ Buy me a coffee');
+            this.menu.addMenuItem(donateItem);
+            donateItem.connect('activate', () => {
+                const url = 'https://www.buymeacoffee.com/firebirdberlin';
+                Gio.AppInfo.launch_default_for_uri(url, null);
+            });
 
             this._setupScreenSaverWatch();
         }
@@ -133,37 +167,37 @@ const SessionTimeIndicator = GObject.registerClass(
          * GitHub page, and donation link.
          */
         _showAboutDialog() {
-            const name = this._metadata.name || 'Gnome Shell Session Time';
+            const name = this._metadata.name || 'Gnome Shell Session Timer';
             const versionName = this._metadata['version-name'];
             const version = versionName
                 ? `${versionName} (${this._metadata.version ?? 'unknown'})`
                 : this._metadata.version ?? 'unknown';
-            const githubUrl = 'https://github.com/firebirdberlin/gnome-shell-session-time';
+            const githubUrl = 'https://github.com/firebirdberlin/gnome-shell-session-timer';
             const donateUrl = 'https://www.buymeacoffee.com/firebirdberlin';
 
             const dialog = new ModalDialog.ModalDialog({
-                styleClass: 'session-time-about-dialog',
+                styleClass: 'session-timer-about-dialog',
                 destroyOnClose: true,
             });
 
             const content = new St.BoxLayout({
                 vertical: true,
-                style_class: 'session-time-about-content',
+                style_class: 'session-timer-about-content',
             });
 
             content.add_child(new St.Label({
                 text: name,
-                style_class: 'session-time-about-title',
+                style_class: 'session-timer-about-title',
             }));
 
             content.add_child(new St.Label({
                 text: `Version ${version}`,
-                style_class: 'session-time-about-version',
+                style_class: 'session-timer-about-version',
             }));
 
             const githubButton = new St.Button({
-                label: '🔗 github.com/firebirdberlin/gnome-shell-session-time',
-                style_class: 'session-time-about-link',
+                label: '🔗 github.com/firebirdberlin/gnome-shell-session-timer',
+                style_class: 'session-timer-about-link',
                 x_align: Clutter.ActorAlign.START,
                 can_focus: true,
                 reactive: true,
@@ -176,7 +210,7 @@ const SessionTimeIndicator = GObject.registerClass(
 
             const donateButton = new St.Button({
                 label: '☕ Buy me a coffee',
-                style_class: 'session-time-about-link',
+                style_class: 'session-timer-about-link',
                 x_align: Clutter.ActorAlign.START,
                 can_focus: true,
                 reactive: true,
@@ -189,7 +223,7 @@ const SessionTimeIndicator = GObject.registerClass(
 
             const stateFileButton = new St.Button({
                 label: '📄 View State File',
-                style_class: 'session-time-about-link',
+                style_class: 'session-timer-about-link',
                 x_align: Clutter.ActorAlign.START,
                 can_focus: true,
                 reactive: true,
@@ -199,7 +233,7 @@ const SessionTimeIndicator = GObject.registerClass(
                 if (this._stateFile.query_exists(null)) {
                     Gio.AppInfo.launch_default_for_uri(this._stateFile.get_uri(), null);
                 } else {
-                    Main.notify('Gnome Shell Session Time', 'No state file yet.');
+                    Main.notify('Gnome Shell Session Timer', 'No state file yet.');
                 }
             });
             content.add_child(stateFileButton);
@@ -309,13 +343,13 @@ const SessionTimeIndicator = GObject.registerClass(
         }
 
         /**
-         * Folds the currently-open unlocked segment into
-         * this._accumulatedSeconds and restarts it at `nowUsec`. No-op
-         * while locked. Called from every tick and state transition so
+         * Folds the currently-open segment into this._accumulatedSeconds
+         * and restarts it at `nowUsec`. No-op while locked or paused.
+         * Called from every tick and state transition so
          * this._accumulatedSeconds is always an up-to-date checkpoint.
          */
         _foldOpenSegment(nowUsec) {
-            if (!this._isLocked && this._segmentStartUsec !== null) {
+            if (!this._isLocked && !this._isPaused && this._segmentStartUsec !== null) {
                 this._accumulatedSeconds += (nowUsec - this._segmentStartUsec) / 1e6;
                 this._segmentStartUsec = nowUsec;
             }
@@ -328,7 +362,7 @@ const SessionTimeIndicator = GObject.registerClass(
 
             this._today = todayKey;
             this._accumulatedSeconds = 0;
-            this._segmentStartUsec = this._isLocked ? null : nowUsec;
+            this._segmentStartUsec = (!this._isLocked && !this._isPaused) ? nowUsec : null;
         }
 
         _onLockStateChanged(isLockedNow) {
@@ -340,7 +374,7 @@ const SessionTimeIndicator = GObject.registerClass(
             this._foldOpenSegment(nowUsec);
 
             this._isLocked = isLockedNow;
-            this._segmentStartUsec = isLockedNow ? null : nowUsec;
+            this._segmentStartUsec = (!this._isLocked && !this._isPaused) ? nowUsec : null;
 
             this._updateLabel();
             this._saveState();
@@ -358,7 +392,8 @@ const SessionTimeIndicator = GObject.registerClass(
             const totalSeconds = Math.max(0, Math.round(this._accumulatedSeconds));
             const hours = Math.floor(totalSeconds / 3600);
             const minutes = Math.floor((totalSeconds % 3600) / 60);
-            let text = `${hours}h ${minutes.toString().padStart(2, '0')}m`;
+            const text = `${hours}h ${minutes.toString().padStart(2, '0')}m`;
+            let panelText = text;
 
             const maxWorkingHours = this._settings.get_double('max-working-hours');
             const barEnabled = maxWorkingHours > 0;
@@ -369,16 +404,42 @@ const SessionTimeIndicator = GObject.registerClass(
                 this._applyProgressBarFraction();
 
                 if (this._settings.get_boolean('show-percentage'))
-                    text += ` (${Math.round(rawFraction * 100)}%)`;
+                    panelText += ` (${Math.round(rawFraction * 100)}%)`;
             }
             this._progressBarItem.visible = barEnabled;
             this._barEnabled = barEnabled;
             this._icon.queue_repaint();
 
-            this._label.set_text(text);
-            this._menuStatusItem.label.set_text(
-                `Active today: ${text}${this._isLocked ? ' (locked)' : ''}`
+            this._label.set_text(panelText);
+            let suffix = '';
+            if (this._isPaused)
+                suffix = ' (paused)';
+            else if (this._isLocked)
+                suffix = ' (locked)';
+            this._menuStatusLabel.set_text(`Active today: ${text}${suffix}`);
+            this._pauseButton.set_label(this._isPaused ? '▶' : '⏹');
+            this._pauseButton.set_style_class_name(
+                `session-timer-pause-button${this._isPaused ? '' : ' session-timer-pause-button-stopped'}`
             );
+        }
+
+        /**
+         * Toggles a user-requested pause: freezes accumulation until
+         * resumed, independent of screen-lock state.
+         */
+        _togglePause() {
+            if (this._destroyed)
+                return;
+
+            const nowUsec = GLib.get_real_time();
+            this._rolloverIfNeeded(nowUsec);
+            this._foldOpenSegment(nowUsec);
+
+            this._isPaused = !this._isPaused;
+            this._segmentStartUsec = (!this._isLocked && !this._isPaused) ? nowUsec : null;
+
+            this._updateLabel();
+            this._saveState();
         }
 
         /**
@@ -465,10 +526,10 @@ const SessionTimeIndicator = GObject.registerClass(
     }
 );
 
-export default class SessionTimeExtension extends Extension {
+export default class SessionTimerExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
-        this._indicator = new SessionTimeIndicator(
+        this._indicator = new SessionTimerIndicator(
             this.path, this.metadata, this._settings, () => this.openPreferences()
         );
         Main.panel.addToStatusArea(this.uuid, this._indicator, 1, 'center');

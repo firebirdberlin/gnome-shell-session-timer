@@ -1,15 +1,15 @@
 {
   "version": 1,
   "version-name": "2026-07-21",
-  "url": "https://github.com/firebirdberlin/gnome-shell-session-time",
+  "url": "https://github.com/firebirdberlin/gnome-shell-session-timer",
   "description": "Shows the cumulative time you've been actively logged in (screen unlocked) today, right in the top panel.",
-  "name": "Gnome Shell Session Time",
+  "name": "Gnome Shell Session Timer",
   "donations": {
     "buymeacoffee": "firebirdberlin",
     "github": "firebirdberlin"
   },
-  "uuid": "gnome-shell-session-time@firebirdberlin",
-  "settings-schema": "org.gnome.shell.extensions.gnome-shell-session-time",
+  "uuid": "gnome-shell-session-timer@firebirdberlin",
+  "settings-schema": "org.gnome.shell.extensions.gnome-shell-session-timer",
   "shell-version": [
     "45",
     "46",

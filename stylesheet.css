@@ -1,4 +1,4 @@
-/* Session Time — panel label styling.
+/* Session Timer — panel label styling.
  * GNOME Shell auto-loads this file from the extension root, no import needed.
  */
 
@@ -6,47 +6,92 @@
     padding-left: 4px;
 }
 
-.session-time-progress-item {
+.session-timer-progress-item {
     padding: 4px 12px 8px 12px;
 }
 
-.session-time-progress-track {
+/* Framed like the control buttons in shelly-cover-control: a fixed-size
+ * bordered box so the button doesn't resize as its glyph toggles between
+ * the narrower "⏹" and wider "▶".
+ */
+.session-timer-pause-button {
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background-color: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+    font-size: 12pt;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    overflow: hidden;
+}
+
+/* The "⏹" glyph renders visually smaller than "▶" at the same font-size
+ * in most fonts, so bump it up a notch to make the two feel equally sized. */
+.session-timer-pause-button-stopped {
+    font-size: 15pt;
+}
+
+.session-timer-pause-button:hover {
+    background-color: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.25);
+    color: #ffffff;
+}
+
+.session-timer-pause-button:active {
+    background-color: rgba(53, 132, 228, 0.45);
+    border-color: rgba(53, 132, 228, 0.8);
+    color: #ffffff;
+}
+
+/* this._menuStatusItem is a non-reactive PopupBaseMenuItem (so clicking the
+ * row background doesn't close the menu), which GNOME Shell tags as
+ * "inactive" and dims by default — force the label back to full white.
+ */
+.session-timer-menu-label {
+    color: #ffffff;
+    /* Reserve enough room for the longest state suffix ("(paused)"/
+     * "(locked)") so toggling it doesn't change the menu's width. */
+    min-width: 18em;
+}
+
+.session-timer-progress-track {
     height: 6px;
     border-radius: 3px;
     background-color: rgba(255, 255, 255, 0.15);
 }
 
-.session-time-progress-fill {
+.session-timer-progress-fill {
     height: 6px;
     border-radius: 3px;
     background-color: #3584e4;
 }
 
 /* About dialog */
-.session-time-about-dialog {
+.session-timer-about-dialog {
     min-width: 360px;
 }
 
-.session-time-about-content {
+.session-timer-about-content {
     spacing: 10px;
     padding: 12px 6px 4px 6px;
 }
 
-.session-time-about-title {
+.session-timer-about-title {
     font-size: 14pt;
     font-weight: bold;
     color: #ffffff;
 }
 
-.session-time-about-version {
+.session-timer-about-version {
     color: rgba(255, 255, 255, 0.6);
 }
 
-.session-time-about-link {
+.session-timer-about-link {
     color: #62a0ea;
     padding: 2px 0;
 }
 
-.session-time-about-link:hover {
+.session-timer-about-link:hover {
     color: #8ec0f2;
 }

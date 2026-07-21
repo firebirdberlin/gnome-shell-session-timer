@@ -1,4 +1,4 @@
-UUID = gnome-shell-session-time@firebirdberlin
+UUID = gnome-shell-session-timer@firebirdberlin
 DIST_DIR = dist
 
 .PHONY: all bump pack release clean test
