@@ -536,6 +536,23 @@ export default class SessionTimerExtension extends Extension {
             this.path, this.metadata, this._settings, () => this.openPreferences()
         );
         Main.panel.addToStatusArea(this.uuid, this._indicator, 1, 'center');
+        this._pinRightOfClock();
+    }
+
+    /**
+     * addToStatusArea's `position` argument is only a sort key among
+     * indicators present in the center box at insertion time — if another
+     * indicator races to claim the same slot while extensions are
+     * re-enabled after the lock screen, insertion order (and thus left/
+     * right placement relative to the clock) isn't guaranteed. Pin our
+     * actor directly after the clock's in the center box so the ordering
+     * can't flip regardless of what else is being added at the same time.
+     */
+    _pinRightOfClock() {
+        const centerBox = Main.panel._centerBox;
+        const dateMenu = Main.panel.statusArea.dateMenu;
+        if (centerBox && dateMenu)
+            centerBox.set_child_above_sibling(this._indicator.container, dateMenu.container);
     }
 
     disable() {
