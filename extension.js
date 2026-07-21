@@ -54,8 +54,7 @@ const SessionTimerIndicator = GObject.registerClass(
             this._destroyed = false;
 
             this._tickId = null;
-            this._screenSaverProxy = null;
-            this._screenSaverSignalId = null;
+            this._screenShieldSignalId = null;
 
             const box = new St.BoxLayout({ style_class: 'panel-status-menu-box' });
 
@@ -160,7 +159,7 @@ const SessionTimerIndicator = GObject.registerClass(
                 Gio.AppInfo.launch_default_for_uri(url, null);
             });
 
-            this._setupScreenSaverWatch();
+            this._setupScreenShieldWatch();
         }
 
         /**
@@ -271,41 +270,23 @@ const SessionTimerIndicator = GObject.registerClass(
         }
 
         /**
-         * GNOME Shell implements org.gnome.ScreenSaver itself and reflects
-         * lock state both as the "Active" property (picked up here via
-         * g-properties-changed) and via GetActive(). We ask GetActive()
-         * once up front to get the correct starting state even if the
-         * extension is (re)enabled while the screen is already locked.
+         * Watching org.gnome.ScreenSaver over D-Bus previously left the
+         * timer stuck "locked" forever: on this system that interface is
+         * served by gnome-settings-daemon's ScreensaverProxy, a separate,
+         * demand-activated process bridging the shell's private lock
+         * state onto the legacy D-Bus API. If that bridge process isn't
+         * running when a lock/unlock happens, the ActiveChanged signal is
+         * simply lost — D-Bus signals aren't queued for later delivery.
+         * Since this extension runs inside the shell process itself,
+         * reading Main.screenShield directly removes that unreliable
+         * extra hop entirely.
          */
-        _setupScreenSaverWatch() {
-            this._screenSaverProxy = new Gio.DBusProxy({
-                g_connection: Gio.DBus.session,
-                g_name: 'org.gnome.ScreenSaver',
-                g_object_path: '/org/gnome/ScreenSaver',
-                g_interface_name: 'org.gnome.ScreenSaver',
-            });
-
-            this._screenSaverSignalId = this._screenSaverProxy.connect(
-                'g-properties-changed',
-                (proxy, changedProperties) => {
-                    const active = changedProperties.lookup_value('Active', null);
-                    if (active)
-                        this._onLockStateChanged(active.get_boolean());
-                }
+        _setupScreenShieldWatch() {
+            this._screenShieldSignalId = Main.screenShield.connect(
+                'active-changed', () => this._onLockStateChanged(Main.screenShield.active)
             );
 
-            this._screenSaverProxy.call(
-                'GetActive', null, Gio.DBusCallFlags.NONE, -1, null,
-                (proxy, res) => {
-                    let isLocked = false;
-                    try {
-                        isLocked = proxy.call_finish(res).deep_unpack()[0];
-                    } catch (e) {
-                        // Assume unlocked if the service can't tell us.
-                    }
-                    this._startTracking(isLocked);
-                }
-            );
+            this._startTracking(Main.screenShield.active);
         }
 
         _startTracking(isLocked) {
@@ -530,11 +511,10 @@ const SessionTimerIndicator = GObject.registerClass(
             }
             this._settings = null;
 
-            if (this._screenSaverProxy && this._screenSaverSignalId) {
-                this._screenSaverProxy.disconnect(this._screenSaverSignalId);
-                this._screenSaverSignalId = null;
+            if (this._screenShieldSignalId) {
+                Main.screenShield.disconnect(this._screenShieldSignalId);
+                this._screenShieldSignalId = null;
             }
-            this._screenSaverProxy = null;
 
             if (this._today !== null) {
                 const nowUsec = GLib.get_real_time();
