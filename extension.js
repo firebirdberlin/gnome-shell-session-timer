@@ -3,6 +3,7 @@ import St from 'gi://St';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Clutter from 'gi://Clutter';
+import Cairo from 'gi://cairo';
 
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -11,6 +12,22 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
 
 const TICK_INTERVAL_SECONDS = 20;
+const BATTERY_ICON_WIDTH = 18;
+const BATTERY_ICON_HEIGHT = 10;
+
+// Rainbow gradient stops for the fill bar, keyed to horizontal position
+// across the full icon width (0 = left, 1 = right) so a given point on the
+// bar always shows the same colour as more of the bar fills in, rather than
+// the gradient being rescaled to whatever fraction is currently filled.
+const RAINBOW_GRADIENT_STOPS = [
+    [0.00, 0.86, 0.15, 0.15], // red
+    [0.17, 0.92, 0.50, 0.10], // orange
+    [0.33, 0.85, 0.80, 0.10], // yellow
+    [0.50, 0.20, 0.70, 0.25], // green
+    [0.67, 0.15, 0.45, 0.85], // blue
+    [0.83, 0.35, 0.20, 0.75], // indigo
+    [1.00, 0.65, 0.15, 0.65], // violet
+];
 
 const SessionTimeIndicator = GObject.registerClass(
     class SessionTimeIndicator extends PanelMenu.Button {
@@ -40,11 +57,19 @@ const SessionTimeIndicator = GObject.registerClass(
 
             const box = new St.BoxLayout({ style_class: 'panel-status-menu-box' });
 
-            this._icon = new St.Icon({
-                icon_name: 'preferences-system-time-symbolic',
+            // Progress-bar icon, hand-drawn with Cairo instead of a
+            // symbolic icon so its fill level can track today's progress
+            // towards the working-hours target. A single filled bar reads
+            // as a level far more clearly at panel-icon size than the
+            // hourglass this replaced, whose two tiny sand chambers were
+            // nearly impossible to tell apart.
+            this._barEnabled = false;
+            this._icon = new St.DrawingArea({
                 style_class: 'system-status-icon',
-                icon_size: 16,
             });
+            this._icon.set_size(BATTERY_ICON_WIDTH, BATTERY_ICON_HEIGHT);
+            this._icon.y_align = Clutter.ActorAlign.CENTER;
+            this._icon.connect('repaint', area => this._drawBatteryIcon(area));
             box.add_child(this._icon);
 
             this._label = new St.Label({
@@ -90,15 +115,6 @@ const SessionTimeIndicator = GObject.registerClass(
             // recompute every time that allocation is (re)assigned.
             this._progressFraction = 0;
             this._progressBarTrack.connect('notify::allocation', () => this._applyProgressBarFraction());
-
-            // Buy me a coffee — at the bottom of the main menu
-            this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-            const donateItem = new PopupMenu.PopupMenuItem('☕ Buy me a coffee');
-            this.menu.addMenuItem(donateItem);
-            donateItem.connect('activate', () => {
-                const url = 'https://www.buymeacoffee.com/firebirdberlin';
-                Gio.AppInfo.launch_default_for_uri(url, null);
-            });
 
             const preferencesItem = new PopupMenu.PopupMenuItem('⚙️ Preferences');
             this.menu.addMenuItem(preferencesItem);
@@ -356,11 +372,52 @@ const SessionTimeIndicator = GObject.registerClass(
                     text += ` (${Math.round(rawFraction * 100)}%)`;
             }
             this._progressBarItem.visible = barEnabled;
+            this._barEnabled = barEnabled;
+            this._icon.queue_repaint();
 
             this._label.set_text(text);
             this._menuStatusItem.label.set_text(
                 `Active today: ${text}${this._isLocked ? ' (locked)' : ''}`
             );
+        }
+
+        /**
+         * Draws the panel progress icon: a borderless bar filled
+         * left-to-right with today's progress fraction towards the
+         * working-hours target. With no target configured (or no time
+         * tracked yet), nothing is drawn.
+         */
+        _drawBatteryIcon(area) {
+            const [w, h] = area.get_surface_size();
+            const cr = area.get_context();
+
+            const margin = 1;
+            const bodyX0 = margin, bodyX1 = w - margin;
+            const bodyY0 = margin, bodyY1 = h - margin;
+
+            if (this._barEnabled) {
+                const fraction = Math.min(1, Math.max(0, this._progressFraction || 0));
+                const fillMaxWidth = bodyX1 - bodyX0;
+
+                // Guarantee at least one visible pixel of fill as soon as
+                // any time is tracked, since the body is only a few pixels
+                // wide and a strictly linear mapping would round tiny
+                // fractions down to nothing.
+                let fillWidth = Math.round(fraction * fillMaxWidth);
+                if (fraction > 0)
+                    fillWidth = Math.max(1, fillWidth);
+
+                if (fillWidth > 0) {
+                    const gradient = new Cairo.LinearGradient(bodyX0, 0, bodyX1, 0);
+                    for (const [pos, r, g, b] of RAINBOW_GRADIENT_STOPS)
+                        gradient.addColorStopRGB(pos, r, g, b);
+                    cr.setSource(gradient);
+                    cr.rectangle(bodyX0, bodyY0, fillWidth, bodyY1 - bodyY0);
+                    cr.fill();
+                }
+            }
+
+            cr.$dispose();
         }
 
         _applyProgressBarFraction() {
