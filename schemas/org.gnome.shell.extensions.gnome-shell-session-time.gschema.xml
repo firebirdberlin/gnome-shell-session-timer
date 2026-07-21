@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="gnome-shell-session-time">
+  <schema id="org.gnome.shell.extensions.gnome-shell-session-time"
+          path="/org/gnome/shell/extensions/gnome-shell-session-time/">
+    <key name="max-working-hours" type="d">
+      <default>0.0</default>
+      <summary>Maximum working hours</summary>
+      <description>
+        Target number of hours to work per day, used to compute the
+        percentage of the target already worked today. Set to 0 to disable.
+      </description>
+    </key>
+    <key name="show-percentage" type="b">
+      <default>true</default>
+      <summary>Show percentage</summary>
+      <description>
+        Whether to append the percentage of the working-hours target
+        reached so far today to the panel label and menu status text. The
+        progress bar in the menu is unaffected by this setting and is shown
+        whenever max-working-hours is greater than 0.
+      </description>
+    </key>
+  </schema>
+</schemalist>

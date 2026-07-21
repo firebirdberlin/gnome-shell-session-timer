@@ -9,6 +9,7 @@
     "github": "firebirdberlin"
   },
   "uuid": "gnome-shell-session-time@firebirdberlin",
+  "settings-schema": "org.gnome.shell.extensions.gnome-shell-session-time",
   "shell-version": [
     "45",
     "46",

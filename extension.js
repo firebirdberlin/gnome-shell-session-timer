@@ -14,11 +14,14 @@ const TICK_INTERVAL_SECONDS = 20;
 
 const SessionTimeIndicator = GObject.registerClass(
     class SessionTimeIndicator extends PanelMenu.Button {
-        _init(extensionPath, metadata) {
+        _init(extensionPath, metadata, settings, openPreferences) {
             super._init(0.0, 'Gnome Shell Session Time', false);
 
             this._metadata = metadata || {};
             this._stateFile = Gio.File.new_for_path(extensionPath).get_child('state.json');
+            this._settings = settings;
+            this._openPreferences = openPreferences;
+            this._settingsChangedId = this._settings.connect('changed', () => this._updateLabel());
 
             // Today's total, in whole seconds, from segments that have
             // already ended (screen got locked). The currently-open
@@ -57,6 +60,37 @@ const SessionTimeIndicator = GObject.registerClass(
             });
             this.menu.addMenuItem(this._menuStatusItem);
 
+            // Progress bar towards the configured working-hours target —
+            // second entry in the menu; hidden while the feature is off.
+            this._progressBarItem = new PopupMenu.PopupBaseMenuItem({
+                reactive: false,
+                can_focus: false,
+                style_class: 'session-time-progress-item',
+            });
+            // FixedLayout allocates children at their own explicitly-set
+            // position/size and never re-centers them — BinLayout's
+            // x-align: START isn't reliably honored here across Shell
+            // versions, which was leaving the fill visually centered.
+            this._progressBarTrack = new St.Widget({
+                style_class: 'session-time-progress-track',
+                layout_manager: new Clutter.FixedLayout(),
+                x_expand: true,
+            });
+            this._progressBarFill = new St.Widget({
+                style_class: 'session-time-progress-fill',
+                width: 0,
+            });
+            this._progressBarFill.set_position(0, 0);
+            this._progressBarTrack.add_child(this._progressBarFill);
+            this._progressBarItem.add_child(this._progressBarTrack);
+            this.menu.addMenuItem(this._progressBarItem);
+
+            // The fill's pixel width is derived from the track's actual
+            // allocated width, which is only known once layout has run —
+            // recompute every time that allocation is (re)assigned.
+            this._progressFraction = 0;
+            this._progressBarTrack.connect('notify::allocation', () => this._applyProgressBarFraction());
+
             // Buy me a coffee — at the bottom of the main menu
             this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             const donateItem = new PopupMenu.PopupMenuItem('☕ Buy me a coffee');
@@ -65,6 +99,10 @@ const SessionTimeIndicator = GObject.registerClass(
                 const url = 'https://www.buymeacoffee.com/firebirdberlin';
                 Gio.AppInfo.launch_default_for_uri(url, null);
             });
+
+            const preferencesItem = new PopupMenu.PopupMenuItem('⚙️ Preferences');
+            this.menu.addMenuItem(preferencesItem);
+            preferencesItem.connect('activate', () => this._openPreferences());
 
             // About — always the last item in the menu
             const aboutItem = new PopupMenu.PopupMenuItem('ℹ️ About');
@@ -304,12 +342,37 @@ const SessionTimeIndicator = GObject.registerClass(
             const totalSeconds = Math.max(0, Math.round(this._accumulatedSeconds));
             const hours = Math.floor(totalSeconds / 3600);
             const minutes = Math.floor((totalSeconds % 3600) / 60);
-            const text = `${hours}h ${minutes.toString().padStart(2, '0')}m`;
+            let text = `${hours}h ${minutes.toString().padStart(2, '0')}m`;
+
+            const maxWorkingHours = this._settings.get_double('max-working-hours');
+            const barEnabled = maxWorkingHours > 0;
+
+            if (barEnabled) {
+                const rawFraction = totalSeconds / (maxWorkingHours * 3600);
+                this._progressFraction = Math.min(1, Math.max(0, rawFraction));
+                this._applyProgressBarFraction();
+
+                if (this._settings.get_boolean('show-percentage'))
+                    text += ` (${Math.round(rawFraction * 100)}%)`;
+            }
+            this._progressBarItem.visible = barEnabled;
 
             this._label.set_text(text);
             this._menuStatusItem.label.set_text(
                 `Active today: ${text}${this._isLocked ? ' (locked)' : ''}`
             );
+        }
+
+        _applyProgressBarFraction() {
+            // get_width() falls back to a "natural size" query when the
+            // actor isn't currently mapped, which for this BinLayout track
+            // just reflects the fill's own last-set width — that would
+            // create a feedback loop shrinking the bar on every tick after
+            // the menu closes. get_allocation_box() returns the actor's
+            // last real allocated geometry instead, without that fallback.
+            const trackWidth = this._progressBarTrack.get_allocation_box().get_width();
+            if (trackWidth > 0)
+                this._progressBarFill.set_width(Math.round(this._progressFraction * trackWidth));
         }
 
         destroy() {
@@ -319,6 +382,12 @@ const SessionTimeIndicator = GObject.registerClass(
                 GLib.Source.remove(this._tickId);
                 this._tickId = null;
             }
+
+            if (this._settings && this._settingsChangedId) {
+                this._settings.disconnect(this._settingsChangedId);
+                this._settingsChangedId = null;
+            }
+            this._settings = null;
 
             if (this._screenSaverProxy && this._screenSaverSignalId) {
                 this._screenSaverProxy.disconnect(this._screenSaverSignalId);
@@ -341,7 +410,10 @@ const SessionTimeIndicator = GObject.registerClass(
 
 export default class SessionTimeExtension extends Extension {
     enable() {
-        this._indicator = new SessionTimeIndicator(this.path, this.metadata);
+        this._settings = this.getSettings();
+        this._indicator = new SessionTimeIndicator(
+            this.path, this.metadata, this._settings, () => this.openPreferences()
+        );
         Main.panel.addToStatusArea(this.uuid, this._indicator, 1, 'center');
     }
 
@@ -350,5 +422,6 @@ export default class SessionTimeExtension extends Extension {
             this._indicator.destroy();
             this._indicator = null;
         }
+        this._settings = null;
     }
 }

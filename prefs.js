@@ -1,0 +1,53 @@
+import Adw from 'gi://Adw';
+import Gio from 'gi://Gio';
+import Gtk from 'gi://Gtk';
+
+import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
+
+export default class SessionTimePreferences extends ExtensionPreferences {
+    fillPreferencesWindow(window) {
+        const settings = this.getSettings();
+
+        const page = new Adw.PreferencesPage();
+        window.add(page);
+
+        const group = new Adw.PreferencesGroup({
+            title: 'Working Hours',
+            description: 'Shows progress toward a daily target, in the panel label and as a bar in the menu.',
+        });
+        page.add(group);
+
+        const hoursRow = new Adw.SpinRow({
+            title: 'Maximum working hours',
+            subtitle: 'Daily target, in hours. Set to 0 to hide the progress bar.',
+            adjustment: new Gtk.Adjustment({
+                lower: 0,
+                upper: 24,
+                step_increment: 0.25,
+                page_increment: 1,
+            }),
+            digits: 2,
+        });
+        group.add(hoursRow);
+
+        settings.bind(
+            'max-working-hours',
+            hoursRow,
+            'value',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+
+        const showPercentageRow = new Adw.SwitchRow({
+            title: 'Show percentage',
+            subtitle: 'Adds the percentage number to the panel label. The progress bar is always shown.',
+        });
+        group.add(showPercentageRow);
+
+        settings.bind(
+            'show-percentage',
+            showPercentageRow,
+            'active',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+    }
+}
