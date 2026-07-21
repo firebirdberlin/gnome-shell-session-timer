@@ -3,12 +3,17 @@
 A minimal GNOME Shell extension that shows, right in the top panel, how long
 you've actually been active (screen unlocked) today.
 
+![Screenshot](screenshot.png)
+
 ## ✨ Features
 
 * **Live panel readout:** Shows a running `Xh YYm` total in the top bar, updated every 20 seconds.
 * **Excludes locked/suspended time:** Tracking pauses whenever the screen locks (including automatic locks around suspend) and resumes on unlock, so the number reflects active usage rather than raw login duration.
+* **Manual pause/resume:** A pause button in the dropdown menu freezes accumulation independently of screen-lock state, e.g. for a lunch break.
+* **Working-hours progress bar:** Set a daily target in Preferences to get a colour-gradient progress bar in the panel icon and in the dropdown menu, plus an optional percentage in the panel label. Leave the target at 0 to hide it.
 * **Resets daily:** The counter rolls over to `0h 00m` at local midnight.
 * **Survives restarts:** The running total is checkpointed to a local state file, so a GNOME Shell restart or a quick extension disable/enable doesn't lose today's progress.
+* **About dialog & state file viewer:** The dropdown menu includes an About dialog (version, GitHub link, donation link) and a shortcut to open the raw state file.
 
 ## 🧩 Dependencies
 
@@ -32,6 +37,13 @@ None to install. Everything used (`GLib`, `GObject`, `Gio`, `Clutter`, `St`) shi
    ```bash
    gnome-extensions enable gnome-shell-session-timer@firebirdberlin
    ```
+
+## ⚙️ Preferences
+
+Open via the ⚙️ Preferences item in the dropdown menu (or `gnome-extensions prefs gnome-shell-session-timer@firebirdberlin`):
+
+* **Maximum working hours:** Daily target, in hours (0–24, quarter-hour steps). Drives the progress bar in the panel icon and menu. Set to `0` to disable it.
+* **Show percentage:** Adds the completed percentage to the panel label, e.g. `4h 30m (56%)`.
 
 ## How it works
 
