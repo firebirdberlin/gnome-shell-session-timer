@@ -11,6 +11,9 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
 
+Gio._promisify(Gio.File.prototype, 'load_contents_async', 'load_contents_finish');
+Gio._promisify(Gio.File.prototype, 'replace_contents_async', 'replace_contents_finish');
+
 const TICK_INTERVAL_SECONDS = 20;
 const BATTERY_ICON_WIDTH = 18;
 const BATTERY_ICON_HEIGHT = 10;
@@ -184,8 +187,9 @@ const SessionTimerIndicator = GObject.registerClass(
                 styleClass: 'session-timer-about-dialog',
                 destroyOnClose: true,
             });
-            dialog.connect('destroy', () => {
+            this._aboutDialogDestroyId = dialog.connect('destroy', () => {
                 this._aboutDialog = null;
+                this._aboutDialogDestroyId = null;
             });
             this._aboutDialog = dialog;
 
@@ -289,14 +293,19 @@ const SessionTimerIndicator = GObject.registerClass(
             this._startTracking(Main.screenShield.active);
         }
 
-        _startTracking(isLocked) {
+        async _startTracking(isLocked) {
             if (this._destroyed)
                 return;
 
             const nowUsec = GLib.get_real_time();
             this._today = this._dateKey(nowUsec);
-            this._accumulatedSeconds = this._readAccumulatedSecondsForToday();
             this._isLocked = isLocked;
+            this._accumulatedSeconds = await this._readAccumulatedSecondsForToday();
+
+            // enable() may have raced disable() while the read was in flight.
+            if (this._destroyed)
+                return;
+
             this._segmentStartUsec = isLocked ? null : nowUsec;
 
             this._updateLabel();
@@ -312,11 +321,9 @@ const SessionTimerIndicator = GObject.registerClass(
             return GLib.DateTime.new_from_unix_local(Math.floor(nowUsec / 1e6)).format('%Y-%m-%d');
         }
 
-        _readAccumulatedSecondsForToday() {
+        async _readAccumulatedSecondsForToday() {
             try {
-                const [ok, contents] = this._stateFile.load_contents(null);
-                if (!ok)
-                    return 0;
+                const [contents] = await this._stateFile.load_contents_async(null);
                 const state = JSON.parse(new TextDecoder().decode(contents));
                 if (state.date === this._today && typeof state.accumulatedSeconds === 'number')
                     return state.accumulatedSeconds;
@@ -327,18 +334,16 @@ const SessionTimerIndicator = GObject.registerClass(
         }
 
         _saveState() {
-            try {
-                const payload = JSON.stringify({
-                    date: this._today,
-                    accumulatedSeconds: Math.round(this._accumulatedSeconds),
-                });
-                this._stateFile.replace_contents(
-                    new GLib.Bytes(payload).get_data(), null, false,
-                    Gio.FileCreateFlags.REPLACE_DESTINATION, null
-                );
-            } catch (e) {
+            const payload = JSON.stringify({
+                date: this._today,
+                accumulatedSeconds: Math.round(this._accumulatedSeconds),
+            });
+            this._stateFile.replace_contents_async(
+                new GLib.Bytes(payload).get_data(), null, false,
+                Gio.FileCreateFlags.REPLACE_DESTINATION, null
+            ).catch(e => {
                 // Best-effort persistence; losing one checkpoint isn't fatal.
-            }
+            });
         }
 
         /**
@@ -496,6 +501,10 @@ const SessionTimerIndicator = GObject.registerClass(
             this._destroyed = true;
 
             if (this._aboutDialog) {
+                if (this._aboutDialogDestroyId) {
+                    this._aboutDialog.disconnect(this._aboutDialogDestroyId);
+                    this._aboutDialogDestroyId = null;
+                }
                 this._aboutDialog.destroy();
                 this._aboutDialog = null;
             }
