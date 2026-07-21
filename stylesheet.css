@@ -1,0 +1,36 @@
+/* Session Time — panel label styling.
+ * GNOME Shell auto-loads this file from the extension root, no import needed.
+ */
+
+.panel-button-text {
+    padding-left: 4px;
+}
+
+/* About dialog */
+.session-time-about-dialog {
+    min-width: 360px;
+}
+
+.session-time-about-content {
+    spacing: 10px;
+    padding: 12px 6px 4px 6px;
+}
+
+.session-time-about-title {
+    font-size: 14pt;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.session-time-about-version {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.session-time-about-link {
+    color: #62a0ea;
+    padding: 2px 0;
+}
+
+.session-time-about-link:hover {
+    color: #8ec0f2;
+}

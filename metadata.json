@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "version-name": "2026-07-21",
+  "url": "https://github.com/firebirdberlin/gnome-shell-session-time",
+  "description": "Shows the cumulative time you've been actively logged in (screen unlocked) today, right in the top panel.",
+  "name": "Gnome Shell Session Time",
+  "donations": {
+    "buymeacoffee": "firebirdberlin",
+    "github": "firebirdberlin"
+  },
+  "uuid": "gnome-shell-session-time@firebirdberlin",
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48",
+    "49",
+    "50"
+  ]
+}
