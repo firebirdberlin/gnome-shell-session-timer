@@ -11,8 +11,8 @@ all: pack
 VERSION_NAME = $(shell python3 -c "import json; print(json.load(open('metadata.json'))['version-name'])")
 ZIP_FILE = $(DIST_DIR)/$(UUID)-v$(VERSION_NAME).shell-extension.zip
 
-# 1. Sets version-name to today's date (YYYY-MM-DD), or appends/increments a
-#    "-N" suffix if a release has already happened today. Also increments the
+# 1. Sets version-name to today's date (YYYY.MM.DD), or appends/increments a
+#    ".N" suffix if a release has already happened today. Also increments the
 #    integer "version" field for local bookkeeping (EGO overwrites it anyway).
 bump:
 	@echo "Current version-name is $(VERSION_NAME)"
