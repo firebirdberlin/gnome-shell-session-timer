@@ -167,6 +167,11 @@ const SessionTimerIndicator = GObject.registerClass(
          * GitHub page, and donation link.
          */
         _showAboutDialog() {
+            if (this._aboutDialog) {
+                this._aboutDialog.open();
+                return;
+            }
+
             const name = this._metadata.name || 'Gnome Shell Session Timer';
             const versionName = this._metadata['version-name'];
             const version = versionName
@@ -179,6 +184,10 @@ const SessionTimerIndicator = GObject.registerClass(
                 styleClass: 'session-timer-about-dialog',
                 destroyOnClose: true,
             });
+            dialog.connect('destroy', () => {
+                this._aboutDialog = null;
+            });
+            this._aboutDialog = dialog;
 
             const content = new St.BoxLayout({
                 vertical: true,
@@ -495,6 +504,11 @@ const SessionTimerIndicator = GObject.registerClass(
 
         destroy() {
             this._destroyed = true;
+
+            if (this._aboutDialog) {
+                this._aboutDialog.destroy();
+                this._aboutDialog = null;
+            }
 
             if (this._tickId) {
                 GLib.Source.remove(this._tickId);
