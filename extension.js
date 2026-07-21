@@ -80,7 +80,10 @@ const SessionTimeIndicator = GObject.registerClass(
          */
         _showAboutDialog() {
             const name = this._metadata.name || 'Gnome Shell Session Time';
-            const version = this._metadata.version ?? this._metadata['version-name'] ?? 'unknown';
+            const versionName = this._metadata['version-name'];
+            const version = versionName
+                ? `${versionName} (${this._metadata.version ?? 'unknown'})`
+                : this._metadata.version ?? 'unknown';
             const githubUrl = 'https://github.com/firebirdberlin/gnome-shell-session-time';
             const donateUrl = 'https://www.buymeacoffee.com/firebirdberlin';
 
