@@ -36,6 +36,7 @@ const SessionTimerIndicator = GObject.registerClass(
 
             this._metadata = metadata || {};
             this._stateFile = Gio.File.new_for_path(extensionPath).get_child('state.json');
+            this._iconFile = Gio.File.new_for_path(extensionPath).get_child('icon.svg');
             this._settings = settings;
             this._openPreferences = openPreferences;
             this._settingsChangedId = this._settings.connect('changed', () => this._updateLabel());
@@ -194,9 +195,17 @@ const SessionTimerIndicator = GObject.registerClass(
                 style_class: 'session-timer-about-content',
             });
 
+            content.add_child(new St.Icon({
+                gicon: new Gio.FileIcon({ file: this._iconFile }),
+                icon_size: 64,
+                style_class: 'session-timer-about-icon',
+                x_align: Clutter.ActorAlign.CENTER,
+            }));
+
             content.add_child(new St.Label({
                 text: name,
                 style_class: 'session-timer-about-title',
+                x_align: Clutter.ActorAlign.CENTER,
             }));
 
             content.add_child(new St.Label({

@@ -77,6 +77,10 @@
     padding: 12px 6px 4px 6px;
 }
 
+.session-timer-about-icon {
+    margin-bottom: 8px;
+}
+
 .session-timer-about-title {
     font-size: 14pt;
     font-weight: bold;

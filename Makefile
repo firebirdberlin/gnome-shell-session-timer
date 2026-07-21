@@ -23,7 +23,7 @@ bump:
 pack:
 	@mkdir -p $(DIST_DIR)
 	@echo "Packaging extension version $(VERSION_NAME)..."
-	gnome-extensions pack -o $(DIST_DIR) --force
+	gnome-extensions pack -o $(DIST_DIR) --force --extra-source=icon.svg
 	@mv $(DIST_DIR)/$(UUID).shell-extension.zip $(ZIP_FILE)
 	@echo "Package created at $(ZIP_FILE)"
 

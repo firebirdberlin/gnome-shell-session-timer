@@ -1,3 +1,5 @@
+<p align="center"><img src="icon.svg" width="96" alt="Gnome Shell Session Timer icon"></p>
+
 # Gnome Shell Session Timer
 
 A minimal GNOME Shell extension that shows, right in the top panel, how long
