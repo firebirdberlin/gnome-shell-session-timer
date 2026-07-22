@@ -60,6 +60,15 @@ const SessionTimerIndicator = GObject.registerClass(
             this._segmentStartUsec = null; // GLib.get_real_time() value the current segment started at
             this._destroyed = false;
 
+            // Grace-period tracking for the currently open lock, if any was
+            // caused by a lock (not a manual pause). this._pausedSeconds as
+            // of the moment the lock started, and the day it started on —
+            // so that on unlock we can tell how long *this* lock lasted and
+            // undo its break if it was shorter than the configured grace
+            // period. Manual pauses never set this, per _onLockStateChanged.
+            this._lockBreakPausedStart = null;
+            this._lockBreakDate = null;
+
             this._tickId = null;
             this._screenShieldSignalId = null;
 
@@ -424,8 +433,51 @@ const SessionTimerIndicator = GObject.registerClass(
             if (wasActive && (this._isLocked || this._isPaused))
                 this._breakCount++;
 
+            // Only a lock that interrupted active (unpaused) time is a
+            // grace-period candidate — a lock on top of an existing manual
+            // pause doesn't start a new break, so it shouldn't get one
+            // un-done either.
+            if (this._isLocked && wasActive) {
+                this._lockBreakPausedStart = this._pausedSeconds;
+                this._lockBreakDate = this._today;
+            } else if (!this._isLocked && this._lockBreakPausedStart !== null) {
+                this._resolveLockGracePeriod();
+            }
+
             this._updateLabel();
             this._saveState();
+        }
+
+        /**
+         * Called right after a lock-caused break ends (screen unlocked).
+         * If the lock lasted no longer than the configured grace period,
+         * it was probably a short interruption rather than a real break —
+         * e.g. stepping away to answer a quick question — so its time is
+         * moved back from paused into accumulated and the break it
+         * triggered is un-counted.
+         */
+        _resolveLockGracePeriod() {
+            const pausedStart = this._lockBreakPausedStart;
+            const sameDay = this._lockBreakDate === this._today;
+            this._lockBreakPausedStart = null;
+            this._lockBreakDate = null;
+
+            // A day rollover happened while locked — this._pausedSeconds was
+            // reset for the new day and no longer relates to pausedStart.
+            if (!sameDay)
+                return;
+
+            const graceMinutes = this._settings.get_double('lock-grace-minutes');
+            if (graceMinutes <= 0)
+                return;
+
+            const lockDurationSeconds = this._pausedSeconds - pausedStart;
+            if (lockDurationSeconds > graceMinutes * 60)
+                return;
+
+            this._pausedSeconds -= lockDurationSeconds;
+            this._accumulatedSeconds += lockDurationSeconds;
+            this._breakCount = Math.max(0, this._breakCount - 1);
         }
 
         _onTick() {

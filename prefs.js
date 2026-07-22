@@ -49,5 +49,31 @@ export default class SessionTimerPreferences extends ExtensionPreferences {
             'active',
             Gio.SettingsBindFlags.DEFAULT
         );
+
+        const breaksGroup = new Adw.PreferencesGroup({
+            title: 'Breaks',
+            description: 'Controls when a locked screen counts as a break in working time.',
+        });
+        page.add(breaksGroup);
+
+        const graceRow = new Adw.SpinRow({
+            title: 'Lock grace period (minutes)',
+            subtitle: 'Unlocking within this many minutes of locking counts as working time, not a break. Set to 0 to count every lock as a break immediately. Manual pauses are always counted as breaks.',
+            adjustment: new Gtk.Adjustment({
+                lower: 0,
+                upper: 60,
+                step_increment: 1,
+                page_increment: 5,
+            }),
+            digits: 0,
+        });
+        breaksGroup.add(graceRow);
+
+        settings.bind(
+            'lock-grace-minutes',
+            graceRow,
+            'value',
+            Gio.SettingsBindFlags.DEFAULT
+        );
     }
 }

@@ -13,6 +13,7 @@ you've actually been active (screen unlocked) today.
 * **Excludes locked/suspended time:** Tracking pauses whenever the screen locks (including automatic locks around suspend) and resumes on unlock, so the number reflects active usage rather than raw login duration.
 * **Manual pause/resume:** A pause button in the dropdown menu freezes accumulation independently of screen-lock state, e.g. for a lunch break.
 * **Break tracking:** Time spent locked or manually paused is totalled separately and shown in the dropdown menu, along with a count of how many breaks were taken today.
+* **Lock grace period:** Short locks (e.g. a quick screen lock to answer a question) don't count as a break if the screen is unlocked again within a configurable grace period; the time is credited back to active work instead. Manual pauses are always counted as breaks.
 * **Working-hours progress bar:** Set a daily target in Preferences to get a colour-gradient progress bar in the panel icon and in the dropdown menu, plus an optional percentage in the panel label. Leave the target at 0 to hide it.
 * **Resets daily:** The counter rolls over to `0h 00m` at local midnight.
 * **Survives restarts:** The running total is checkpointed to a local state file, so a GNOME Shell restart or a quick extension disable/enable doesn't lose today's progress.
@@ -47,6 +48,7 @@ Open via the ⚙️ Preferences item in the dropdown menu (or `gnome-extensions 
 
 * **Maximum working hours:** Daily target, in hours (0–24, quarter-hour steps). Drives the progress bar in the panel icon and menu. Set to `0` to disable it.
 * **Show percentage:** Adds the completed percentage to the panel label, e.g. `4h 30m (56%)`.
+* **Lock grace period (minutes):** Unlocking within this many minutes of locking counts as working time, not a break. Defaults to 3 minutes; set to `0` to count every lock as a break immediately. Manual pauses are always counted as breaks regardless of this setting.
 
 ## How it works
 
@@ -54,10 +56,13 @@ The extension watches GNOME Shell's `org.gnome.ScreenSaver` D-Bus service for
 lock/unlock transitions. While unlocked and not manually paused, elapsed
 wall-clock time accrues towards today's active total; while locked or
 paused, it accrues instead towards today's paused total, and each
-active→paused transition increments the break count. Both running totals
-for the current date are checkpointed to `state.json` next to the extension
-code every 20 seconds and on every lock/unlock/pause/disable, so they can be
-restored if GNOME Shell restarts mid-day.
+active→paused transition increments the break count. When a lock (as
+opposed to a manual pause) ends within the configured grace period, the
+time it accrued is moved back from paused to active and its break is
+un-counted, so brief locks don't interrupt the working total. Both running
+totals for the current date are checkpointed to `state.json` next to the
+extension code every 20 seconds and on every lock/unlock/pause/disable, so
+they can be restored if GNOME Shell restarts mid-day.
 
 ## 🛠️ Development
 
