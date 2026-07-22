@@ -46,14 +46,18 @@ const SessionTimerIndicator = GObject.registerClass(
 
             // Today's total, in whole seconds, from segments that have
             // already ended (screen got locked). The currently-open
-            // unlocked segment (if any) is tracked separately below and
-            // only folded in here on tick/lock/destroy, so we never lose
-            // more than one tick's worth of data to a crash.
+            // segment (if any) is tracked separately below and only
+            // folded in here on tick/lock/destroy, so we never lose more
+            // than one tick's worth of data to a crash. Time is always
+            // accruing to exactly one of these two buckets: accumulated
+            // while active, paused while locked or manually paused.
             this._accumulatedSeconds = 0;
+            this._pausedSeconds = 0;
+            this._breakCount = 0; // number of active->paused transitions today
             this._today = null; // 'YYYY-MM-DD', local time
             this._isLocked = false;
             this._isPaused = false; // user-requested pause, independent of lock state
-            this._segmentStartUsec = null; // GLib.get_real_time() value, or null while locked/paused
+            this._segmentStartUsec = null; // GLib.get_real_time() value the current segment started at
             this._destroyed = false;
 
             this._tickId = null;
@@ -115,7 +119,7 @@ const SessionTimerIndicator = GObject.registerClass(
             this.menu.addMenuItem(this._menuStatusItem);
 
             // Progress bar towards the configured working-hours target —
-            // second entry in the menu; hidden while the feature is off.
+            // directly below "Active today"; hidden while the feature is off.
             this._progressBarItem = new PopupMenu.PopupBaseMenuItem({
                 reactive: false,
                 can_focus: false,
@@ -144,6 +148,21 @@ const SessionTimerIndicator = GObject.registerClass(
             // recompute every time that allocation is (re)assigned.
             this._progressFraction = 0;
             this._progressBarTrack.connect('notify::allocation', () => this._applyProgressBarFraction());
+
+            this._menuPausedItem = new PopupMenu.PopupBaseMenuItem({
+                reactive: false,
+                can_focus: false,
+                style_class: 'session-timer-status-item',
+            });
+            this._menuPausedLabel = new St.Label({
+                text: 'Paused today: --',
+                x_expand: true,
+                x_align: Clutter.ActorAlign.START,
+                y_align: Clutter.ActorAlign.CENTER,
+                style_class: 'session-timer-menu-label',
+            });
+            this._menuPausedItem.add_child(this._menuPausedLabel);
+            this.menu.addMenuItem(this._menuPausedItem);
 
             const preferencesItem = new PopupMenu.PopupMenuItem('⚙️ Preferences');
             this.menu.addMenuItem(preferencesItem);
@@ -300,13 +319,16 @@ const SessionTimerIndicator = GObject.registerClass(
             const nowUsec = GLib.get_real_time();
             this._today = this._dateKey(nowUsec);
             this._isLocked = isLocked;
-            this._accumulatedSeconds = await this._readAccumulatedSecondsForToday();
+            const state = await this._readStateForToday();
+            this._accumulatedSeconds = state.accumulatedSeconds;
+            this._pausedSeconds = state.pausedSeconds;
+            this._breakCount = state.breakCount;
 
             // enable() may have raced disable() while the read was in flight.
             if (this._destroyed)
                 return;
 
-            this._segmentStartUsec = isLocked ? null : nowUsec;
+            this._segmentStartUsec = nowUsec;
 
             this._updateLabel();
             this._saveState();
@@ -321,22 +343,30 @@ const SessionTimerIndicator = GObject.registerClass(
             return GLib.DateTime.new_from_unix_local(Math.floor(nowUsec / 1e6)).format('%Y-%m-%d');
         }
 
-        async _readAccumulatedSecondsForToday() {
+        async _readStateForToday() {
+            const empty = { accumulatedSeconds: 0, pausedSeconds: 0, breakCount: 0 };
             try {
                 const [contents] = await this._stateFile.load_contents_async(null);
                 const state = JSON.parse(new TextDecoder().decode(contents));
-                if (state.date === this._today && typeof state.accumulatedSeconds === 'number')
-                    return state.accumulatedSeconds;
+                if (state.date === this._today) {
+                    return {
+                        accumulatedSeconds: typeof state.accumulatedSeconds === 'number' ? state.accumulatedSeconds : 0,
+                        pausedSeconds: typeof state.pausedSeconds === 'number' ? state.pausedSeconds : 0,
+                        breakCount: typeof state.breakCount === 'number' ? state.breakCount : 0,
+                    };
+                }
             } catch (e) {
                 // No state file yet, or it's unreadable/corrupt — start from 0.
             }
-            return 0;
+            return empty;
         }
 
         _saveState() {
             const payload = JSON.stringify({
                 date: this._today,
                 accumulatedSeconds: Math.round(this._accumulatedSeconds),
+                pausedSeconds: Math.round(this._pausedSeconds),
+                breakCount: this._breakCount,
             });
             this._stateFile.replace_contents_async(
                 new GLib.Bytes(payload).get_data(), null, false,
@@ -347,16 +377,23 @@ const SessionTimerIndicator = GObject.registerClass(
         }
 
         /**
-         * Folds the currently-open segment into this._accumulatedSeconds
-         * and restarts it at `nowUsec`. No-op while locked or paused.
-         * Called from every tick and state transition so
-         * this._accumulatedSeconds is always an up-to-date checkpoint.
+         * Folds the currently-open segment into whichever bucket it
+         * belongs to — this._accumulatedSeconds while active, or
+         * this._pausedSeconds while locked or manually paused — using
+         * the state as of *before* this call, then restarts the segment
+         * at `nowUsec`. Called from every tick and state transition so
+         * both accumulators are always an up-to-date checkpoint.
          */
         _foldOpenSegment(nowUsec) {
-            if (!this._isLocked && !this._isPaused && this._segmentStartUsec !== null) {
-                this._accumulatedSeconds += (nowUsec - this._segmentStartUsec) / 1e6;
-                this._segmentStartUsec = nowUsec;
-            }
+            if (this._segmentStartUsec === null)
+                return;
+
+            const elapsedSeconds = (nowUsec - this._segmentStartUsec) / 1e6;
+            if (this._isLocked || this._isPaused)
+                this._pausedSeconds += elapsedSeconds;
+            else
+                this._accumulatedSeconds += elapsedSeconds;
+            this._segmentStartUsec = nowUsec;
         }
 
         _rolloverIfNeeded(nowUsec) {
@@ -366,7 +403,9 @@ const SessionTimerIndicator = GObject.registerClass(
 
             this._today = todayKey;
             this._accumulatedSeconds = 0;
-            this._segmentStartUsec = (!this._isLocked && !this._isPaused) ? nowUsec : null;
+            this._pausedSeconds = 0;
+            this._breakCount = 0;
+            this._segmentStartUsec = nowUsec;
         }
 
         _onLockStateChanged(isLockedNow) {
@@ -375,10 +414,15 @@ const SessionTimerIndicator = GObject.registerClass(
 
             const nowUsec = GLib.get_real_time();
             this._rolloverIfNeeded(nowUsec);
+
+            const wasActive = !this._isLocked && !this._isPaused;
             this._foldOpenSegment(nowUsec);
 
             this._isLocked = isLockedNow;
-            this._segmentStartUsec = (!this._isLocked && !this._isPaused) ? nowUsec : null;
+            this._segmentStartUsec = nowUsec;
+
+            if (wasActive && (this._isLocked || this._isPaused))
+                this._breakCount++;
 
             this._updateLabel();
             this._saveState();
@@ -421,10 +465,24 @@ const SessionTimerIndicator = GObject.registerClass(
             else if (this._isLocked)
                 suffix = ' (locked)';
             this._menuStatusLabel.set_text(`Active today: ${text}${suffix}`);
+
+            const pausedTotalSeconds = Math.max(0, Math.round(this._pausedSeconds));
+            const pausedHours = Math.floor(pausedTotalSeconds / 3600);
+            const pausedMinutes = Math.floor((pausedTotalSeconds % 3600) / 60);
+            const pausedText = `${pausedHours}h ${pausedMinutes.toString().padStart(2, '0')}m`;
+            const breakWord = this._breakCount === 1 ? 'break' : 'breaks';
+            this._menuPausedLabel.set_text(`Paused today: ${pausedText} (${this._breakCount} ${breakWord})`);
+
             this._pauseButton.set_label(this._isPaused ? '▶' : '⏹');
             this._pauseButton.set_style_class_name(
                 `session-timer-pause-button${this._isPaused ? '' : ' session-timer-pause-button-stopped'}`
             );
+            // Hidden while locked: stopping/resuming makes no sense on the
+            // lock screen, and the panel stays visible there (session-modes
+            // includes 'unlock-dialog'), so anyone at the lock screen could
+            // otherwise toggle it. The user's own paused/active state is
+            // untouched by locking, so it's restored as-is on unlock.
+            this._pauseButton.visible = !this._isLocked;
         }
 
         /**
@@ -432,15 +490,20 @@ const SessionTimerIndicator = GObject.registerClass(
          * resumed, independent of screen-lock state.
          */
         _togglePause() {
-            if (this._destroyed)
+            if (this._destroyed || this._isLocked)
                 return;
 
             const nowUsec = GLib.get_real_time();
             this._rolloverIfNeeded(nowUsec);
+
+            const wasActive = !this._isLocked && !this._isPaused;
             this._foldOpenSegment(nowUsec);
 
             this._isPaused = !this._isPaused;
-            this._segmentStartUsec = (!this._isLocked && !this._isPaused) ? nowUsec : null;
+            this._segmentStartUsec = nowUsec;
+
+            if (wasActive && (this._isLocked || this._isPaused))
+                this._breakCount++;
 
             this._updateLabel();
             this._saveState();
@@ -546,6 +609,14 @@ export default class SessionTimerExtension extends Extension {
         );
         Main.panel.addToStatusArea(this.uuid, this._indicator, 1, 'center');
         this._pinRightOfClock();
+
+        // Since we stay enabled through the lock screen (session-modes
+        // includes 'unlock-dialog'), Panel re-lays out the center box to
+        // match each session mode's panel config on every lock/unlock,
+        // which undoes the pin above. Re-pin on every such transition.
+        this._sessionModeSignalId = Main.sessionMode.connect(
+            'updated', () => this._pinRightOfClock()
+        );
     }
 
     /**
@@ -560,11 +631,15 @@ export default class SessionTimerExtension extends Extension {
     _pinRightOfClock() {
         const centerBox = Main.panel._centerBox;
         const dateMenu = Main.panel.statusArea.dateMenu;
-        if (centerBox && dateMenu)
+        if (centerBox && dateMenu && this._indicator)
             centerBox.set_child_above_sibling(this._indicator.container, dateMenu.container);
     }
 
     disable() {
+        if (this._sessionModeSignalId) {
+            Main.sessionMode.disconnect(this._sessionModeSignalId);
+            this._sessionModeSignalId = null;
+        }
         if (this._indicator) {
             this._indicator.destroy();
             this._indicator = null;

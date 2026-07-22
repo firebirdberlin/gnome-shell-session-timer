@@ -12,6 +12,7 @@ you've actually been active (screen unlocked) today.
 * **Live panel readout:** Shows a running `Xh YYm` total in the top bar, updated every 20 seconds.
 * **Excludes locked/suspended time:** Tracking pauses whenever the screen locks (including automatic locks around suspend) and resumes on unlock, so the number reflects active usage rather than raw login duration.
 * **Manual pause/resume:** A pause button in the dropdown menu freezes accumulation independently of screen-lock state, e.g. for a lunch break.
+* **Break tracking:** Time spent locked or manually paused is totalled separately and shown in the dropdown menu, along with a count of how many breaks were taken today.
 * **Working-hours progress bar:** Set a daily target in Preferences to get a colour-gradient progress bar in the panel icon and in the dropdown menu, plus an optional percentage in the panel label. Leave the target at 0 to hide it.
 * **Resets daily:** The counter rolls over to `0h 00m` at local midnight.
 * **Survives restarts:** The running total is checkpointed to a local state file, so a GNOME Shell restart or a quick extension disable/enable doesn't lose today's progress.
@@ -50,11 +51,13 @@ Open via the ⚙️ Preferences item in the dropdown menu (or `gnome-extensions 
 ## How it works
 
 The extension watches GNOME Shell's `org.gnome.ScreenSaver` D-Bus service for
-lock/unlock transitions. While unlocked, elapsed wall-clock time accrues
-towards today's total; while locked, the clock pauses. The running total for
-the current date is checkpointed to `state.json` next to the extension code
-every 20 seconds and on every lock/unlock/disable, so it can be restored if
-GNOME Shell restarts mid-day.
+lock/unlock transitions. While unlocked and not manually paused, elapsed
+wall-clock time accrues towards today's active total; while locked or
+paused, it accrues instead towards today's paused total, and each
+active→paused transition increments the break count. Both running totals
+for the current date are checkpointed to `state.json` next to the extension
+code every 20 seconds and on every lock/unlock/pause/disable, so they can be
+restored if GNOME Shell restarts mid-day.
 
 ## 🛠️ Development
 

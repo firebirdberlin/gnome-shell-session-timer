@@ -10,6 +10,7 @@
   },
   "uuid": "gnome-shell-session-timer@firebirdberlin",
   "settings-schema": "org.gnome.shell.extensions.gnome-shell-session-timer",
+  "session-modes": ["user", "unlock-dialog"],
   "shell-version": [
     "45",
     "46",
