@@ -68,6 +68,16 @@ const SessionTimerIndicator = GObject.registerClass(
             // period. Manual pauses never set this, per _onLockStateChanged.
             this._lockBreakPausedStart = null;
             this._lockBreakDate = null;
+            this._lockStartUsec = null; // wall-clock time the current pending lock began
+
+            // Start of the current uninterrupted work session, for the CSV
+            // session log — null whenever there's no open session (locked,
+            // or manually paused). Grace-period locks don't close a
+            // session, only a confirmed break (manual pause, or a lock that
+            // outlasts the grace period) does.
+            this._sessionStartUsec = null;
+            this._csvDirFile = null;
+            this._csvWriteQueue = null;
 
             this._tickId = null;
             this._screenShieldSignalId = null;
@@ -172,6 +182,57 @@ const SessionTimerIndicator = GObject.registerClass(
             });
             this._menuPausedItem.add_child(this._menuPausedLabel);
             this.menu.addMenuItem(this._menuPausedItem);
+
+            // Session log — CSV files are yearly, so a plain "open" link
+            // wouldn't be enough to reach past years, hence a link to the
+            // containing folder alongside the current file's shortcut.
+            this._sessionLogItem = new PopupMenu.PopupBaseMenuItem({
+                reactive: false,
+                can_focus: false,
+                style_class: 'session-timer-status-item',
+            });
+            const sessionLogLabel = new St.Label({
+                text: 'Session log file',
+                x_expand: true,
+                x_align: Clutter.ActorAlign.START,
+                y_align: Clutter.ActorAlign.CENTER,
+                style_class: 'session-timer-menu-label',
+            });
+            this._sessionLogItem.add_child(sessionLogLabel);
+
+            const openLogFileButton = new St.Button({
+                // U+FE0E forces the monochrome text-style glyph instead of
+                // this font's default multicolour emoji rendering, so the
+                // icon actually follows the button's white text colour.
+                label: '🗎︎',
+                style_class: 'session-timer-pause-button',
+                can_focus: true,
+                reactive: true,
+                track_hover: true,
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            openLogFileButton.connect('clicked', () => {
+                this.menu.close();
+                this._openCurrentSessionCsv();
+            });
+            this._sessionLogItem.add_child(openLogFileButton);
+
+            const openLogFolderButton = new St.Button({
+                label: '🗀︎',
+                style_class: 'session-timer-pause-button',
+                can_focus: true,
+                reactive: true,
+                track_hover: true,
+                y_align: Clutter.ActorAlign.CENTER,
+                style: 'margin-left: 6px;',
+            });
+            openLogFolderButton.connect('clicked', () => {
+                this.menu.close();
+                this._openSessionCsvFolder();
+            });
+            this._sessionLogItem.add_child(openLogFolderButton);
+            this.menu.addMenuItem(this._sessionLogItem);
+            this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
             const preferencesItem = new PopupMenu.PopupMenuItem('⚙️ Preferences');
             this.menu.addMenuItem(preferencesItem);
@@ -338,6 +399,10 @@ const SessionTimerIndicator = GObject.registerClass(
                 return;
 
             this._segmentStartUsec = nowUsec;
+            // Discard a persisted session start if we're coming back up
+            // already locked — whatever happened during the gap before
+            // this run started isn't something we can account for.
+            this._sessionStartUsec = this._isLocked ? null : (state.sessionStartUsec ?? nowUsec);
 
             this._updateLabel();
             this._saveState();
@@ -353,7 +418,7 @@ const SessionTimerIndicator = GObject.registerClass(
         }
 
         async _readStateForToday() {
-            const empty = { accumulatedSeconds: 0, pausedSeconds: 0, breakCount: 0 };
+            const empty = { accumulatedSeconds: 0, pausedSeconds: 0, breakCount: 0, sessionStartUsec: null };
             try {
                 const [contents] = await this._stateFile.load_contents_async(null);
                 const state = JSON.parse(new TextDecoder().decode(contents));
@@ -362,6 +427,7 @@ const SessionTimerIndicator = GObject.registerClass(
                         accumulatedSeconds: typeof state.accumulatedSeconds === 'number' ? state.accumulatedSeconds : 0,
                         pausedSeconds: typeof state.pausedSeconds === 'number' ? state.pausedSeconds : 0,
                         breakCount: typeof state.breakCount === 'number' ? state.breakCount : 0,
+                        sessionStartUsec: typeof state.sessionStartUsec === 'number' ? state.sessionStartUsec : null,
                     };
                 }
             } catch (e) {
@@ -376,12 +442,93 @@ const SessionTimerIndicator = GObject.registerClass(
                 accumulatedSeconds: Math.round(this._accumulatedSeconds),
                 pausedSeconds: Math.round(this._pausedSeconds),
                 breakCount: this._breakCount,
+                sessionStartUsec: this._sessionStartUsec,
             });
             this._stateFile.replace_contents_async(
                 new GLib.Bytes(payload).get_data(), null, false,
                 Gio.FileCreateFlags.REPLACE_DESTINATION, null
             ).catch(e => {
                 // Best-effort persistence; losing one checkpoint isn't fatal.
+            });
+        }
+
+        _openCurrentSessionCsv() {
+            const file = this._csvFileForYear(this._currentYear());
+            if (file.query_exists(null))
+                Gio.AppInfo.launch_default_for_uri(file.get_uri(), null);
+            else
+                Main.notify('Gnome Shell Session Timer', 'No session log yet for this year.');
+        }
+
+        _openSessionCsvFolder() {
+            Gio.AppInfo.launch_default_for_uri(this._csvDir().get_uri(), null);
+        }
+
+        /**
+         * The directory sessions-*.csv files live in — outside the
+         * extension's own install directory, so the log survives even if
+         * the extension is reinstalled elsewhere.
+         */
+        _csvDir() {
+            if (!this._csvDirFile) {
+                const dirPath = GLib.build_filenamev([GLib.get_user_data_dir(), 'gnome-shell-session-timer']);
+                GLib.mkdir_with_parents(dirPath, 0o755);
+                this._csvDirFile = Gio.File.new_for_path(dirPath);
+            }
+            return this._csvDirFile;
+        }
+
+        _currentYear() {
+            return GLib.DateTime.new_now_local().format('%Y');
+        }
+
+        _csvFileForYear(year) {
+            return this._csvDir().get_child(`sessions-${year}.csv`);
+        }
+
+        _formatCsvDateTime(usec) {
+            return GLib.DateTime.new_from_unix_local(Math.floor(usec / 1e6)).format('%Y-%m-%d %H:%M:%S');
+        }
+
+        _formatDurationHHMM(totalSeconds) {
+            const seconds = Math.max(0, Math.round(totalSeconds));
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        }
+
+        /**
+         * Appends one completed work session to that session's year's CSV
+         * file (created with a header if it doesn't exist yet), queued
+         * behind any write already in flight so concurrent calls can't
+         * race each other's read-modify-write. Sessions cut short by a
+         * grace-period lock never reach here — only confirmed breaks
+         * (manual pause, or a lock that outlasted the grace period) close
+         * a session and log it.
+         */
+        _appendSessionToCsv(startUsec, endUsec) {
+            if (startUsec === null || endUsec === null || endUsec <= startUsec)
+                return;
+
+            const row = `${this._formatCsvDateTime(startUsec)};${this._formatCsvDateTime(endUsec)};` +
+                `${this._formatDurationHHMM((endUsec - startUsec) / 1e6)}\n`;
+            const year = GLib.DateTime.new_from_unix_local(Math.floor(endUsec / 1e6)).format('%Y');
+            const file = this._csvFileForYear(year);
+
+            this._csvWriteQueue = (this._csvWriteQueue || Promise.resolve()).then(async () => {
+                let existing = '';
+                try {
+                    const [contents] = await file.load_contents_async(null);
+                    existing = new TextDecoder().decode(contents);
+                } catch (e) {
+                    existing = 'start;end;total\n';
+                }
+                await file.replace_contents_async(
+                    new GLib.Bytes(existing + row).get_data(), null, false,
+                    Gio.FileCreateFlags.REPLACE_DESTINATION, null
+                );
+            }).catch(e => {
+                // Best-effort logging; a lost row shouldn't break tracking.
             });
         }
 
@@ -440,9 +587,15 @@ const SessionTimerIndicator = GObject.registerClass(
             if (this._isLocked && wasActive) {
                 this._lockBreakPausedStart = this._pausedSeconds;
                 this._lockBreakDate = this._today;
+                this._lockStartUsec = nowUsec;
             } else if (!this._isLocked && this._lockBreakPausedStart !== null) {
-                this._resolveLockGracePeriod();
+                this._resolveLockGracePeriod(nowUsec);
             }
+
+            // Catches the case where tracking started already locked (so no
+            // lock-break was ever opened above) and this is its first unlock.
+            if (!this._isLocked && !this._isPaused && this._sessionStartUsec === null)
+                this._sessionStartUsec = nowUsec;
 
             this._updateLabel();
             this._saveState();
@@ -454,30 +607,35 @@ const SessionTimerIndicator = GObject.registerClass(
          * it was probably a short interruption rather than a real break —
          * e.g. stepping away to answer a quick question — so its time is
          * moved back from paused into accumulated and the break it
-         * triggered is un-counted.
+         * triggered is un-counted, and the work session it interrupted
+         * carries on uninterrupted. Otherwise it's a confirmed real break:
+         * the session that was running before the lock gets logged to the
+         * CSV, and a new one starts now that the screen is unlocked again.
          */
-        _resolveLockGracePeriod() {
+        _resolveLockGracePeriod(nowUsec) {
             const pausedStart = this._lockBreakPausedStart;
+            const lockStartUsec = this._lockStartUsec;
             const sameDay = this._lockBreakDate === this._today;
             this._lockBreakPausedStart = null;
             this._lockBreakDate = null;
+            this._lockStartUsec = null;
 
             // A day rollover happened while locked — this._pausedSeconds was
-            // reset for the new day and no longer relates to pausedStart.
-            if (!sameDay)
-                return;
-
+            // reset for the new day and no longer relates to pausedStart, so
+            // grace can't be evaluated. Treat it as a confirmed break below.
             const graceMinutes = this._settings.get_double('lock-grace-minutes');
-            if (graceMinutes <= 0)
-                return;
+            const lockDurationSeconds = sameDay ? this._pausedSeconds - pausedStart : null;
+            const withinGrace = sameDay && graceMinutes > 0 && lockDurationSeconds <= graceMinutes * 60;
 
-            const lockDurationSeconds = this._pausedSeconds - pausedStart;
-            if (lockDurationSeconds > graceMinutes * 60)
+            if (withinGrace) {
+                this._pausedSeconds -= lockDurationSeconds;
+                this._accumulatedSeconds += lockDurationSeconds;
+                this._breakCount = Math.max(0, this._breakCount - 1);
                 return;
+            }
 
-            this._pausedSeconds -= lockDurationSeconds;
-            this._accumulatedSeconds += lockDurationSeconds;
-            this._breakCount = Math.max(0, this._breakCount - 1);
+            this._appendSessionToCsv(this._sessionStartUsec, lockStartUsec);
+            this._sessionStartUsec = nowUsec;
         }
 
         _onTick() {
@@ -554,8 +712,16 @@ const SessionTimerIndicator = GObject.registerClass(
             this._isPaused = !this._isPaused;
             this._segmentStartUsec = nowUsec;
 
-            if (wasActive && (this._isLocked || this._isPaused))
+            if (wasActive && (this._isLocked || this._isPaused)) {
                 this._breakCount++;
+                // Manual pauses have no grace period — always a confirmed
+                // real break, so close out the session immediately.
+                this._appendSessionToCsv(this._sessionStartUsec, nowUsec);
+                this._sessionStartUsec = null;
+            } else if (!wasActive && !this._isPaused) {
+                // Resuming from a manual pause starts a fresh session.
+                this._sessionStartUsec = nowUsec;
+            }
 
             this._updateLabel();
             this._saveState();
@@ -645,6 +811,12 @@ const SessionTimerIndicator = GObject.registerClass(
                 this._rolloverIfNeeded(nowUsec);
                 this._foldOpenSegment(nowUsec);
                 this._segmentStartUsec = null;
+
+                if (!this._isLocked && !this._isPaused) {
+                    this._appendSessionToCsv(this._sessionStartUsec, nowUsec);
+                    this._sessionStartUsec = null;
+                }
+
                 this._saveState();
             }
 

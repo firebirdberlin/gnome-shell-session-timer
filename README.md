@@ -17,6 +17,7 @@ you've actually been active (screen unlocked) today.
 * **Working-hours progress bar:** Set a daily target in Preferences to get a colour-gradient progress bar in the panel icon and in the dropdown menu, plus an optional percentage in the panel label. Leave the target at 0 to hide it.
 * **Resets daily:** The counter rolls over to `0h 00m` at local midnight.
 * **Survives restarts:** The running total is checkpointed to a local state file, so a GNOME Shell restart or a quick extension disable/enable doesn't lose today's progress.
+* **CSV session log:** Every completed work session (start, end, total `hh:mm`) is appended to a yearly CSV file in `~/.local/share/gnome-shell-session-timer/sessions-<year>.csv`. Sessions merely interrupted by a grace-period lock don't appear as separate rows — they're logged as one continuous session.
 * **About dialog & state file viewer:** The dropdown menu includes an About dialog (version, GitHub link, donation link) and a shortcut to open the raw state file.
 
 ## 🧩 Dependencies
@@ -63,6 +64,14 @@ un-counted, so brief locks don't interrupt the working total. Both running
 totals for the current date are checkpointed to `state.json` next to the
 extension code every 20 seconds and on every lock/unlock/pause/disable, so
 they can be restored if GNOME Shell restarts mid-day.
+
+Separately, a confirmed break (a manual pause, or a lock that outlasts the
+grace period) closes out the work session that preceded it and appends it
+as one row — start datetime, end datetime, total `hh:mm` — to
+`~/.local/share/gnome-shell-session-timer/sessions-<year>.csv`, creating
+that year's file with a header row the first time it's written to. A new
+session starts as soon as work resumes. Grace-period locks never close a
+session, so short interruptions don't fragment the log.
 
 ## 🛠️ Development
 
