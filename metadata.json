@@ -1,6 +1,6 @@
 {
-  "version": 3,
-  "version-name": "2026.08.20",
+  "version": 4,
+  "version-name": "2026.08.20.2",
   "url": "https://github.com/firebirdberlin/gnome-shell-session-timer",
   "description": "Shows the cumulative time you've been actively logged in today, right in the top panel.",
   "name": "Gnome Shell Session Timer",
