@@ -13,7 +13,7 @@ export default class SessionTimerPreferences extends ExtensionPreferences {
 
         const group = new Adw.PreferencesGroup({
             title: 'Working Hours',
-            description: 'Shows progress toward a daily target, in the panel label and as a bar in the menu.',
+            description: 'Shows progress towards a daily target.',
         });
         page.add(group);
 
@@ -39,7 +39,7 @@ export default class SessionTimerPreferences extends ExtensionPreferences {
 
         const showPercentageRow = new Adw.SwitchRow({
             title: 'Show percentage',
-            subtitle: 'Adds the percentage number to the panel label. The progress bar is always shown.',
+            subtitle: 'Adds the percentage number to the panel label.',
         });
         group.add(showPercentageRow);
 

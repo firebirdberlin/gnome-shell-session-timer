@@ -1,7 +1,3 @@
-/* Session Timer — panel label styling.
- * GNOME Shell auto-loads this file from the extension root, no import needed.
- */
-
 .panel-button-text {
     padding-left: 4px;
 }
@@ -10,10 +6,6 @@
     padding: 4px 12px 8px 12px;
 }
 
-/* Framed like the control buttons in shelly-cover-control: a fixed-size
- * bordered box so the button doesn't resize as its glyph toggles between
- * the narrower "⏹" and wider "▶".
- */
 .session-timer-pause-button {
     border-radius: 4px;
     border: 1px solid rgba(255, 255, 255, 0.15);
@@ -26,8 +18,6 @@
     overflow: hidden;
 }
 
-/* The "⏹" glyph renders visually smaller than "▶" at the same font-size
- * in most fonts, so bump it up a notch to make the two feel equally sized. */
 .session-timer-pause-button-stopped {
     font-size: 15pt;
 }
@@ -44,14 +34,8 @@
     color: #ffffff;
 }
 
-/* this._menuStatusItem is a non-reactive PopupBaseMenuItem (so clicking the
- * row background doesn't close the menu), which GNOME Shell tags as
- * "inactive" and dims by default — force the label back to full white.
- */
 .session-timer-menu-label {
     color: #ffffff;
-    /* Reserve enough room for the longest state suffix ("(paused)"/
-     * "(locked)") so toggling it doesn't change the menu's width. */
     min-width: 18em;
 }
 
@@ -67,7 +51,6 @@
     background-color: #3584e4;
 }
 
-/* About dialog */
 .session-timer-about-dialog {
     min-width: 360px;
 }
