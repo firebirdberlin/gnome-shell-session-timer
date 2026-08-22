@@ -1,7 +1,8 @@
 UUID = gnome-shell-session-timer@firebirdberlin
 DIST_DIR = dist
+INSTALL_DIR = $(HOME)/.local/share/gnome-shell/extensions/$(UUID)
 
-.PHONY: all bump pack release clean test
+.PHONY: all bump pack release clean test install compile-schemas logs
 
 all: pack
 
@@ -10,6 +11,23 @@ all: pack
 # on upload, so version-name is our own date-based versioning scheme instead.
 VERSION_NAME = $(shell python3 -c "import json; print(json.load(open('metadata.json'))['version-name'])")
 ZIP_FILE = $(DIST_DIR)/$(UUID)-v$(VERSION_NAME).shell-extension.zip
+
+# Compile the GSettings schemas required by the extension.
+compile-schemas:
+	@echo "Compiling GSettings schemas..."
+	glib-compile-schemas schemas/
+
+# Follow GNOME Shell logs and show errors related to this extension.
+logs:
+	journalctl -f -o cat /usr/bin/gnome-shell | grep --line-buffered -i -E 'gnome-shell-session-timer|extension.js'
+
+# Install the extension as a symbolic link to the working tree.
+# This is intended for local development and keeps the installed extension
+# in sync with the source tree.
+install: compile-schemas
+	@mkdir -p $$(dirname $(INSTALL_DIR))
+	@ln -sfn $(CURDIR) $(INSTALL_DIR)
+	@echo "Extension installed at $(INSTALL_DIR)"
 
 # 1. Sets version-name to today's date (YYYY.MM.DD), or appends/increments a
 #    ".N" suffix if a release has already happened today. Also increments the
@@ -20,7 +38,7 @@ bump:
 	@echo "Version bumped to $$(python3 -c "import json; print(json.load(open('metadata.json'))['version-name'])")"
 
 # 2. Packages the files and renames the zip to include the version-name
-pack:
+pack: compile-schemas
 	@mkdir -p $(DIST_DIR)
 	@echo "Packaging extension version $(VERSION_NAME)..."
 	gnome-extensions pack -o $(DIST_DIR) --force --extra-source=icon.svg

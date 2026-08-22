@@ -22,7 +22,7 @@ you've actually been active (screen unlocked) today.
 
 ## 🧩 Dependencies
 
-None to install. Everything used (`GLib`, `GObject`, `Gio`, `Clutter`, `St`) ships as part of GNOME Shell / GJS itself on any of the supported versions (45–50).
+None to install. Everything used (`GLib`, `GObject`, `Gio`, `Clutter`, `St`) ships as part of GNOME Shell / GJS itself on any of the supported versions (45–50). Development also requires `glib-compile-schemas`, which is normally provided by the GLib development tools.
 
 ## 📦 Installation (Manual)
 
@@ -31,17 +31,28 @@ None to install. Everything used (`GLib`, `GObject`, `Gio`, `Clutter`, `St`) shi
    git clone git@github.com:firebirdberlin/gnome-shell-session-timer.git ~/Projects/gnome-shell-session-timer
    ```
 
-2. Create a symbolic link pointing from your GNOME Shell extensions directory to the cloned repository:
+2. Run the installation target from the cloned repository:
    ```bash
-   ln -s ~/Projects/gnome-shell-session-timer ~/.local/share/gnome-shell/extensions/gnome-shell-session-timer@firebirdberlin
+   cd ~/Projects/gnome-shell-session-timer
+   make install
    ```
 
-   > ⚠️ **Important (Wayland users):** GNOME Shell only scans for new extension directories during startup. If you are running Wayland, you **must log out and log back in now**, otherwise the next step will fail with an error stating the extension does not exist.
+   This compiles the GSettings schemas and creates a symbolic link from
+   `~/.local/share/gnome-shell/extensions/` to the working tree. Running
+   `make install` again after source changes is safe and recompiles the schemas.
+
+   > ⚠️ **Important (Wayland users):** GNOME Shell only scans for new extension
+   > directories during startup. If this is the first installation and the
+   > extension does not appear in `gnome-extensions list`, log out and back in
+   > before enabling it.
 
 3. Enable the extension:
    ```bash
    gnome-extensions enable gnome-shell-session-timer@firebirdberlin
    ```
+
+For an existing development checkout, `make compile-schemas` is also available
+when you only need to regenerate `schemas/gschemas.compiled`.
 
 ## ⚙️ Preferences
 
@@ -76,7 +87,14 @@ session, so short interruptions don't fragment the log.
 ## 🛠️ Development
 
 ```bash
-make pack     # build a .shell-extension.zip into dist/
-make test     # launch a nested GNOME Shell session for quick manual testing
-make release  # bump version, pack, commit, tag and push
+make compile-schemas  # compile the GSettings schemas
+make install          # compile schemas and install a development symlink
+make pack             # build a .shell-extension.zip into dist/
+make test             # launch a nested GNOME Shell session for quick manual testing
+make release          # bump version, pack, commit, tag and push
 ```
+
+`make install` is intended for local development: it links the GNOME Shell
+extension directory directly to the current working tree, so source changes are
+immediately visible to GNOME Shell. Use `make pack` for a distributable
+extension archive.
