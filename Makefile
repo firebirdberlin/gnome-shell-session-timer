@@ -30,8 +30,7 @@ install: compile-schemas
 	@echo "Extension installed at $(INSTALL_DIR)"
 
 # 1. Sets version-name to today's date (YYYY.MM.DD), or appends/increments a
-#    ".N" suffix if a release has already happened today. Also increments the
-#    integer "version" field for local bookkeeping (EGO overwrites it anyway).
+#    ".N" suffix if a release has already happened today.
 bump:
 	@echo "Current version-name is $(VERSION_NAME)"
 	@python3 bump-version.py
@@ -63,6 +62,7 @@ release: bump
 clean:
 	@echo "Cleaning up uncommitted files in $(DIST_DIR)..."
 	git clean -f $(DIST_DIR)
+	rm .*.swp
 
 test:
 	dbus-run-session gnome-shell --nested --wayland

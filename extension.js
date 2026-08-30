@@ -41,18 +41,14 @@ const SessionTimerIndicator = GObject.registerClass(
             this._openPreferences = openPreferences;
             this._settingsChangedId = this._settings.connect('changed', () => this._updateLabel());
             this._tickId = null;
-            this._screenShieldSignalId = null;
-            this._destroyed = false;
 
             // variables for time tracking
             this._accumulatedSeconds = 0; // today's seconds while in actove state
-            this._pausedSeconds = 0; // seconds in paused state; regardless of manual or automatic locks
+            this._pausedSeconds = 0; // seconds in paused state; regardless of manual pauses or lock gaps
             this._breakCount = 0; // number of breaks todays
             this._today = null; // 'YYYY-MM-DD', string of today's date for date rollover detection
-            this._isLocked = false; // true if screen lock is active
-            this._isPaused = false; // user-requested pause, independent of lock state
+            this._isPaused = false; // user-requested pause
             this._segmentStartUsec = null; // GLib.get_real_time() value the current segment started at
-            this._lockStartUsec = null; // wall-clock time when the current pending lock began
 
             // variables for csv logging
             this._sessionStartUsec = null;
@@ -73,12 +69,7 @@ const SessionTimerIndicator = GObject.registerClass(
 
             this._createMenu();
 
-            // Watch changes of the screen lock state.
-            this._screenShieldSignalId = Main.screenShield.connect(
-                'active-changed', () => this._onLockStateChanged(Main.screenShield.active)
-            );
-
-            this._startTracking(Main.screenShield.active);
+            this._startTracking();
         }
 
         // a rainbow progress bar used as an icon.
@@ -89,7 +80,7 @@ const SessionTimerIndicator = GObject.registerClass(
             });
             this._icon.set_size(ICON_WIDTH, ICON_HEIGHT);
             this._icon.y_align = Clutter.ActorAlign.CENTER;
-            this._icon.connect('repaint', area => this._drawIcon(area));
+            this._iconRepaintId = this._icon.connect('repaint', area => this._drawIcon(area));
             box.add_child(this._icon);
         }
 
@@ -111,7 +102,6 @@ const SessionTimerIndicator = GObject.registerClass(
 
             // Pause/resume toggle for user-requested breaks
             this._pauseButton = new St.Button({
-                label: '⏹',
                 style_class: 'session-timer-pause-button session-timer-pause-button-stopped',
                 can_focus: true,
                 reactive: true,
@@ -119,6 +109,12 @@ const SessionTimerIndicator = GObject.registerClass(
                 x_align: Clutter.ActorAlign.END,
                 y_align: Clutter.ActorAlign.CENTER,
             });
+            this._pauseIcon = new St.Icon({
+                icon_name: 'media-playback-pause-symbolic',
+                icon_size: 16,
+                style_class: 'popup-menu-icon',
+            });
+            this._pauseButton.set_child(this._pauseIcon);
             this._pauseButton.connect('clicked', () => this._togglePause());
             this._menuStatusItem.add_child(this._pauseButton);
 
@@ -156,7 +152,11 @@ const SessionTimerIndicator = GObject.registerClass(
             this._sessionLogItem.add_child(sessionLogLabel);
 
             const openLogFileButton = new St.Button({
-                label: '🗎︎',
+                child: new St.Icon({
+                    icon_name: 'document-open-symbolic',
+                    icon_size: 16,
+                    style_class: 'popup-menu-icon',
+                }),
                 style_class: 'session-timer-pause-button',
                 can_focus: true,
                 reactive: true,
@@ -170,7 +170,11 @@ const SessionTimerIndicator = GObject.registerClass(
             this._sessionLogItem.add_child(openLogFileButton);
 
             const openLogFolderButton = new St.Button({
-                label: '🗀︎',
+                child: new St.Icon({
+                    icon_name: 'folder-symbolic',
+                    icon_size: 16,
+                    style_class: 'popup-menu-icon',
+                }),
                 style_class: 'session-timer-pause-button',
                 can_focus: true,
                 reactive: true,
@@ -186,16 +190,16 @@ const SessionTimerIndicator = GObject.registerClass(
             this.menu.addMenuItem(this._sessionLogItem);
             this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-            const preferencesItem = new PopupMenu.PopupMenuItem('⚙️ Preferences');
+            const preferencesItem = new PopupMenu.PopupImageMenuItem('Preferences', 'preferences-system-symbolic');
             this.menu.addMenuItem(preferencesItem);
             preferencesItem.connect('activate', () => this._openPreferences());
 
-            const aboutItem = new PopupMenu.PopupMenuItem('ℹ️ About');
+            const aboutItem = new PopupMenu.PopupImageMenuItem('About', 'help-about-symbolic');
             this.menu.addMenuItem(aboutItem);
             aboutItem.connect('activate', () => this._showAboutDialog());
 
             this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-            const donateItem = new PopupMenu.PopupMenuItem('☕ Buy me a coffee');
+            const donateItem = new PopupMenu.PopupImageMenuItem('Buy me a coffee', 'emblem-favorite-symbolic');
             this.menu.addMenuItem(donateItem);
             donateItem.connect('activate', () => {
                 const url = 'https://www.buymeacoffee.com/firebirdberlin';
@@ -225,7 +229,9 @@ const SessionTimerIndicator = GObject.registerClass(
             this.menu.addMenuItem(this._progressBarItem);
 
             this._progress = 0;
-            this._progressBarTrack.connect('notify::allocation', () => this._applyProgressBarFraction());
+            this._progressAllocationId = this._progressBarTrack.connect(
+                'notify::allocation', () => this._applyProgressBarFraction()
+            );
         }
 
         _notify(title, message) {
@@ -293,40 +299,21 @@ const SessionTimerIndicator = GObject.registerClass(
                 style_class: 'session-timer-about-version',
             }));
 
-            const githubButton = new St.Button({
-                label: '🔗 github.com/firebirdberlin/gnome-shell-session-timer',
-                style_class: 'session-timer-about-link',
-                x_align: Clutter.ActorAlign.START,
-                can_focus: true,
-                reactive: true,
-                track_hover: true,
-            });
+            const githubButton = this._createIconLinkButton(
+                'web-browser-symbolic', 'github.com/firebirdberlin/gnome-shell-session-timer'
+            );
             githubButton.connect('clicked', () => {
                 Gio.AppInfo.launch_default_for_uri(githubUrl, null);
             });
             content.add_child(githubButton);
 
-            const donateButton = new St.Button({
-                label: '☕ Buy me a coffee',
-                style_class: 'session-timer-about-link',
-                x_align: Clutter.ActorAlign.START,
-                can_focus: true,
-                reactive: true,
-                track_hover: true,
-            });
+            const donateButton = this._createIconLinkButton('emblem-favorite-symbolic', 'Buy me a coffee');
             donateButton.connect('clicked', () => {
                 Gio.AppInfo.launch_default_for_uri(donateUrl, null);
             });
             content.add_child(donateButton);
 
-            const stateFileButton = new St.Button({
-                label: '📄 View State File',
-                style_class: 'session-timer-about-link',
-                x_align: Clutter.ActorAlign.START,
-                can_focus: true,
-                reactive: true,
-                track_hover: true,
-            });
+            const stateFileButton = this._createIconLinkButton('text-x-generic-symbolic', 'View State File');
             stateFileButton.connect('clicked', () => {
                 if (this._stateFile.query_exists(null)) {
                     Gio.AppInfo.launch_default_for_uri(this._stateFile.get_uri(), null);
@@ -350,26 +337,65 @@ const SessionTimerIndicator = GObject.registerClass(
             dialog.open();
         }
 
-        async _startTracking(isLocked) {
-            if (this._destroyed)
-                return;
+        // Builds a text button with a leading St.Icon, used for the about dialog's links.
+        _createIconLinkButton(iconName, text) {
+            const button = new St.Button({
+                style_class: 'session-timer-about-link',
+                x_align: Clutter.ActorAlign.START,
+                can_focus: true,
+                reactive: true,
+                track_hover: true,
+            });
+            const box = new St.BoxLayout({
+                style_class: 'session-timer-about-link-box',
+                style: 'spacing: 8px;',
+            });
+            box.add_child(new St.Icon({
+                icon_name: iconName,
+                icon_size: 16,
+                style_class: 'popup-menu-icon',
+                y_align: Clutter.ActorAlign.CENTER,
+            }));
+            box.add_child(new St.Label({ text, y_align: Clutter.ActorAlign.CENTER }));
+            button.set_child(box);
+            return button;
+        }
 
+        async _startTracking() {
             const nowUsec = GLib.get_real_time();
             this._today = this.getDateStr(nowUsec);
-            this._isLocked = isLocked;
             const state = await this._readStateForToday();
             this._accumulatedSeconds = state.accumulatedSeconds;
             this._pausedSeconds = state.pausedSeconds;
             this._breakCount = state.breakCount;
 
-            if (this._destroyed)
-                return;
-
-            if (state.sessionStartUsec !== null)
-                this._appendSessionToCsv(state.sessionStartUsec, state.sessionHeartbeatUsec ?? state.sessionStartUsec);
-
             this._segmentStartUsec = nowUsec;
-            this._sessionStartUsec = this._isLocked ? null : nowUsec;
+            this._sessionStartUsec = nowUsec;
+
+            // Check the last open session on start or after unlock. If within the grace
+            // period, then account the break as working time. Count as a break if outside the
+            // grace period.
+            if (state.sessionStartUsec !== null && state.sessionHeartbeatUsec !== null &&
+                this.getDateStr(state.sessionHeartbeatUsec) === this._today) {
+                const gapSeconds = (nowUsec - state.sessionHeartbeatUsec) / 1e6;
+                const graceMinutes = this._settings.get_double('lock-grace-minutes');
+                const withinGrace = graceMinutes > 0 && gapSeconds <= graceMinutes * 60;
+
+                if (withinGrace) {
+                    this._accumulatedSeconds += gapSeconds;
+                    this._sessionStartUsec = state.sessionStartUsec;
+                } else {
+                    this._pausedSeconds += gapSeconds;
+                    this._breakCount++;
+                    this._appendSessionToCsv(state.sessionStartUsec, state.sessionHeartbeatUsec);
+                }
+            } else if (state.sessionStartUsec !== null) {
+                // Left over from a previous day, or heartbeat missing (e.g. corrupt state) -
+                // just close it out without trying to bridge the gap.
+                this._appendSessionToCsv(
+                    state.sessionStartUsec, state.sessionHeartbeatUsec ?? state.sessionStartUsec
+                );
+            }
 
             this._updateLabel();
             this._saveState();
@@ -501,18 +527,18 @@ const SessionTimerIndicator = GObject.registerClass(
 
         // ------------------------------- time tracking helpers ----------------------------------
         /**
-         * Flushes the time since the last checkpoint. This function is called whenever the
-         * lock state changes, when the uses pauses or restarts time tracking and on cleanup
+         * Flushes the time since the last checkpoint. Called on each tick, when the user
+         * toggles a manual pause, and on cleanup.
          */
         _flushTimeSegment(nowUsec) {
             if (this._segmentStartUsec === null)
                 return;
 
             const elapsedSeconds = (nowUsec - this._segmentStartUsec) / 1e6;
-            if (!this._isLocked && !this._isPaused) {
-                this._accumulatedSeconds += elapsedSeconds;
-            } else if (this._isPaused) {
+            if (this._isPaused) {
                 this._pausedSeconds += elapsedSeconds;
+            } else {
+                this._accumulatedSeconds += elapsedSeconds;
             }
             this._segmentStartUsec = nowUsec;
             this._rolloverIfNeeded(nowUsec);
@@ -532,55 +558,6 @@ const SessionTimerIndicator = GObject.registerClass(
             this._breakCount = 0;
         }
 
-        _onLockStateChanged(isLockedNow) {
-            if (this._destroyed || isLockedNow === this._isLocked)
-                return;
-
-            const nowUsec = GLib.get_real_time();
-            const wasActive = !this._isLocked && !this._isPaused;
-            this._flushTimeSegment(nowUsec);
-
-            this._isLocked = isLockedNow;
-            this._segmentStartUsec = nowUsec;
-
-            if (this._isLocked && wasActive) {
-                this._lockStartUsec = nowUsec;
-            } else if (!this._isLocked && this._lockStartUsec !== null) {
-                this._onLockEnded(nowUsec);
-            }
-
-            // Catches the case where tracking started already locked (so no
-            // lock-break was ever opened above) and this is its first unlock.
-            if (!this._isLocked && !this._isPaused && this._sessionStartUsec === null)
-                this._sessionStartUsec = nowUsec;
-
-            this._updateLabel();
-            this._saveState();
-        }
-
-        /**
-         * Handling the end of a screen lock session taking the configured grace period
-         * into account.
-         */
-        _onLockEnded(nowUsec) {
-            const lockStartUsec = this._lockStartUsec;
-            const sameDay = this.getDateStr(lockStartUsec) === this._today;
-            const lockDurationSeconds = sameDay ? (nowUsec - lockStartUsec) / 1e6 : null;
-
-            const graceMinutes = this._settings.get_double('lock-grace-minutes');
-            const withinGrace = sameDay && graceMinutes > 0 && lockDurationSeconds <= graceMinutes * 60;
-
-            if (withinGrace) {
-                this._accumulatedSeconds += lockDurationSeconds;
-            } else {
-                this._pausedSeconds += lockDurationSeconds;
-                this._breakCount++;
-                this._appendSessionToCsv(this._sessionStartUsec, lockStartUsec);
-                this._sessionStartUsec = nowUsec;
-            }
-
-            this._lockStartUsec = null;
-        }
 
         _onTick() {
             const nowUsec = GLib.get_real_time();
@@ -589,12 +566,16 @@ const SessionTimerIndicator = GObject.registerClass(
             this._saveState();
         }
 
+        _formatHoursMinutes(totalSeconds) {
+            const seconds = Math.max(0, Math.round(totalSeconds));
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
+        }
+
         _updateLabel() {
-            const nowUsec = GLib.get_real_time();
             const totalSeconds = Math.max(0, Math.round(this._accumulatedSeconds));
-            const hours = Math.floor(totalSeconds / 3600);
-            const minutes = Math.floor((totalSeconds % 3600) / 60);
-            const text = `${hours}h ${minutes.toString().padStart(2, '0')}m`;
+            const text = this._formatHoursMinutes(totalSeconds);
             let panelText = text;
 
             const maxWorkingHours = this._settings.get_double('max-working-hours');
@@ -613,44 +594,24 @@ const SessionTimerIndicator = GObject.registerClass(
             this._icon.queue_repaint();
 
             this._label.set_text(panelText);
-            let suffix = '';
-            if (this._isPaused)
-                suffix = ' (paused)';
-            else if (this._isLocked)
-                suffix = ' (locked)';
+            const suffix = this._isPaused ? ' (paused)' : '';
             this._menuStatusLabel.set_text(`Active today: ${text}${suffix}`);
 
-
-            let durationLockedUsec = 0;
-            if (this._isLocked) {
-                durationLockedUsec = (nowUsec - this._lockStartUsec) / 1e6;
-            }
-            const pausedTotalSeconds = Math.max(0, Math.round(this._pausedSeconds)) + durationLockedUsec;
-            const pausedHours = Math.floor(pausedTotalSeconds / 3600);
-            const pausedMinutes = Math.floor((pausedTotalSeconds % 3600) / 60);
-            const pausedText = `${pausedHours}h ${pausedMinutes.toString().padStart(2, '0')}m`;
+            const pausedText = this._formatHoursMinutes(this._pausedSeconds);
             const breakWord = this._breakCount === 1 ? 'break' : 'breaks';
             this._menuPausedLabel.set_text(`Paused today: ${pausedText} (${this._breakCount} ${breakWord})`);
 
-            this._pauseButton.set_label(this._isPaused ? '▶' : '⏹');
+            this._pauseIcon.icon_name = this._isPaused
+                ? 'media-playback-start-symbolic' : 'media-playback-pause-symbolic';
             this._pauseButton.set_style_class_name(
                 `session-timer-pause-button${this._isPaused ? '' : ' session-timer-pause-button-stopped'}`
             );
-
-            // allow manual pausing only in unlocked state; anyone could modify the paused state otherwise
-            this._pauseButton.visible = !this._isLocked;
         }
 
-        /**
-         * Toggles a user-requested pause: freezes accumulation until
-         * resumed, independent of screen-lock state.
-         */
+        // Toggles a user-requested pause.
         _togglePause() {
-            if (this._destroyed || this._isLocked)
-                return;
-
             const nowUsec = GLib.get_real_time();
-            const wasActive = !this._isLocked && !this._isPaused;
+            const wasActive = !this._isPaused;
             this._flushTimeSegment(nowUsec);
 
             this._isPaused = !this._isPaused;
@@ -704,31 +665,26 @@ const SessionTimerIndicator = GObject.registerClass(
         }
 
         destroy() {
-            this._destroyed = true;
-
-            if (this._aboutDialog) {
-                if (this._aboutDialogDestroyId) {
-                    this._aboutDialog.disconnect(this._aboutDialogDestroyId);
-                    this._aboutDialogDestroyId = null;
-                }
-                this._aboutDialog.destroy();
-                this._aboutDialog = null;
-            }
-
             if (this._tickId) {
                 GLib.Source.remove(this._tickId);
                 this._tickId = null;
             }
 
+            if (this._iconRepaintId) {
+                this._icon.disconnect(this._iconRepaintId);
+                this._iconRepaintId = null;
+            }
+            if (this._progressAllocationId) {
+                this._progressBarTrack.disconnect(this._progressAllocationId);
+                this._progressAllocationId = null;
+            }
             if (this._settings && this._settingsChangedId) {
                 this._settings.disconnect(this._settingsChangedId);
                 this._settingsChangedId = null;
             }
-            this._settings = null;
-
-            if (this._screenShieldSignalId) {
-                Main.screenShield.disconnect(this._screenShieldSignalId);
-                this._screenShieldSignalId = null;
+            if (this._aboutDialogDestroyId) {
+                this._aboutDialog.disconnect(this._aboutDialogDestroyId);
+                this._aboutDialogDestroyId = null;
             }
 
             if (this._today !== null) {
@@ -737,6 +693,11 @@ const SessionTimerIndicator = GObject.registerClass(
                 this._segmentStartUsec = null;
                 this._saveState();
             }
+            if (this._aboutDialog) {
+                this._aboutDialog.destroy();
+                this._aboutDialog = null;
+            }
+            this._settings = null;
 
             super.destroy();
         }
@@ -758,17 +719,6 @@ export default class SessionTimerExtension extends Extension {
         );
     }
 
-    /**
-     * Pins the extension to the right of the clock, so that the user always finds in in the
-     * same location
-     */
-    _pinRightOfClock() {
-        const centerBox = Main.panel._centerBox;
-        const dateMenu = Main.panel.statusArea.dateMenu;
-        if (centerBox && dateMenu && this._indicator)
-            centerBox.set_child_above_sibling(this._indicator.container, dateMenu.container);
-    }
-
     disable() {
         if (this._sessionModeSignalId) {
             Main.sessionMode.disconnect(this._sessionModeSignalId);
@@ -779,5 +729,16 @@ export default class SessionTimerExtension extends Extension {
             this._indicator = null;
         }
         this._settings = null;
+    }
+
+    /**
+     * Pins the extension to the right of the clock, so that the user always finds in in the
+     * same location
+     */
+    _pinRightOfClock() {
+        const centerBox = Main.panel._centerBox;
+        const dateMenu = Main.panel.statusArea.dateMenu;
+        if (centerBox && dateMenu && this._indicator)
+            centerBox.set_child_above_sibling(this._indicator.container, dateMenu.container);
     }
 }

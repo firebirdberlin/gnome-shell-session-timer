@@ -20,7 +20,6 @@ else:
     new_version_name = today
 
 metadata["version-name"] = new_version_name
-metadata["version"] = metadata.get("version", 0) + 1
 
 with open("metadata.json", "w") as f:
     json.dump(metadata, f, indent=2)

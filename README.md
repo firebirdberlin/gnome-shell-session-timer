@@ -22,7 +22,7 @@ you've actually been active (screen unlocked) today.
 
 ## 🧩 Dependencies
 
-None to install. Everything used (`GLib`, `GObject`, `Gio`, `Clutter`, `St`) ships as part of GNOME Shell / GJS itself on any of the supported versions (45–50). Development also requires `glib-compile-schemas`, which is normally provided by the GLib development tools.
+None to install. Everything used (`GLib`, `GObject`, `Gio`, `Clutter`, `St`, `Cairo`) ships as part of GNOME Shell / GJS itself on any of the supported versions (45–50). Development also requires `glib-compile-schemas`, which is normally provided by the GLib development tools.
 
 ## 📦 Installation (Manual)
 
@@ -56,7 +56,7 @@ when you only need to regenerate `schemas/gschemas.compiled`.
 
 ## ⚙️ Preferences
 
-Open via the ⚙️ Preferences item in the dropdown menu (or `gnome-extensions prefs gnome-shell-session-timer@firebirdberlin`):
+Open via the Preferences item in the dropdown menu (or `gnome-extensions prefs gnome-shell-session-timer@firebirdberlin`):
 
 * **Maximum working hours:** Daily target, in hours (0–24, quarter-hour steps). Drives the progress bar in the panel icon and menu. Set to `0` to disable it.
 * **Show percentage:** Adds the completed percentage to the panel label, e.g. `4h 30m (56%)`.
@@ -64,17 +64,19 @@ Open via the ⚙️ Preferences item in the dropdown menu (or `gnome-extensions 
 
 ## How it works
 
-The extension watches GNOME Shell's `org.gnome.ScreenSaver` D-Bus service for
-lock/unlock transitions. While unlocked and not manually paused, elapsed
-wall-clock time accrues towards today's active total; while locked or
-paused, it accrues instead towards today's paused total, and each
-active→paused transition increments the break count. When a lock (as
-opposed to a manual pause) ends within the configured grace period, the
-time it accrued is moved back from paused to active and its break is
-un-counted, so brief locks don't interrupt the working total. Both running
-totals for the current date are checkpointed to `state.json` next to the
-extension code every 20 seconds and on every lock/unlock/pause/disable, so
-they can be restored if GNOME Shell restarts mid-day.
+The extension only runs in the normal `user` session mode, so GNOME Shell
+fully disables it the moment the screen locks and re-enables it on unlock
+(the same lifecycle used for user-switching and suspend). Right before being
+disabled, it writes a timestamped checkpoint to `state.json`; on the next
+enable, it compares that timestamp to the current time to work out how long
+the gap lasted. If the gap is within the configured grace period, that time
+is credited back to today's active total and no break is recorded;
+otherwise it's added to the paused total and counts as a break. Manual
+pauses use the same active/paused accounting but are always counted as a
+break, regardless of the grace period. Both running totals for the current
+date are checkpointed to `state.json` next to the extension code every 20
+seconds, on every manual pause/resume, and right before the extension is
+disabled, so they can be restored if GNOME Shell restarts mid-day.
 
 Separately, a confirmed break (a manual pause, or a lock that outlasts the
 grace period) closes out the work session that preceded it and appends it

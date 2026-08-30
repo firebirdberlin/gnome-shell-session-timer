@@ -58,7 +58,9 @@ export default class SessionTimerPreferences extends ExtensionPreferences {
 
         const graceRow = new Adw.SpinRow({
             title: 'Lock grace period (minutes)',
-            subtitle: 'Unlocking within this many minutes of locking counts as working time, not a break. Set to 0 to count every lock as a break immediately. Manual pauses are always counted as breaks.',
+            subtitle: 'Unlocking within this many minutes of locking counts as working time, ' +
+                'not a break. Set to 0 to count every lock as a break immediately. Manual ' +
+                'pauses are always counted as breaks.',
             adjustment: new Gtk.Adjustment({
                 lower: 0,
                 upper: 60,
